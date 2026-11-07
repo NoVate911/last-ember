@@ -1,0 +1,129 @@
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap');
+
+/*
+  Game HUD palette. The HUD always sits over the dark 3D world, so it uses a fixed
+  iron-and-brass palette that stays legible in both light and dark app themes.
+*/
+.hud-root {
+  --hud-bg: rgba(18, 20, 24, 0.9);
+  --hud-bg-2: rgba(32, 34, 39, 0.92);
+  --hud-brass: #b08a4a;
+  --hud-brass-dim: #6e5630;
+  --hud-text: #ece3cf;
+  --hud-muted: #a59c8a;
+  --hud-amber: #ffad4a;
+  --hud-good: #7fd38f;
+  --hud-bad: #ff6b55;
+  --hud-cold: #8ec5ff;
+  font-family: 'Spectral', Georgia, serif;
+  color: var(--hud-text);
+  user-select: none;
+}
+
+.hud-font {
+  font-family: 'Oswald', 'Arial Narrow', sans-serif;
+  letter-spacing: 0.06em;
+}
+
+.hud-panel {
+  background: linear-gradient(180deg, var(--hud-bg-2), var(--hud-bg));
+  border: 1px solid var(--hud-brass-dim);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 22px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.hud-panel-rivets {
+  position: relative;
+}
+.hud-panel-rivets::before,
+.hud-panel-rivets::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #e0c08a, #5a4422);
+}
+.hud-panel-rivets::before { left: 5px; }
+.hud-panel-rivets::after { right: 5px; }
+
+.hud-btn {
+  font-family: 'Oswald', 'Arial Narrow', sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #34373e, #22252a);
+  border: 1px solid var(--hud-brass-dim);
+  color: var(--hud-text);
+  transition: border-color 0.15s, box-shadow 0.15s, color 0.15s, background 0.15s;
+}
+.hud-btn:hover:not(:disabled) {
+  border-color: var(--hud-brass);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 173, 74, 0.25);
+}
+.hud-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.hud-btn[data-active='true'] {
+  background: linear-gradient(180deg, #6b4a1f, #3e2a12);
+  border-color: var(--hud-amber);
+  color: #fff4dd;
+  box-shadow: 0 0 12px rgba(255, 173, 74, 0.35);
+}
+.hud-btn:focus-visible {
+  outline: 2px solid var(--hud-amber);
+  outline-offset: 1px;
+}
+
+.hud-title {
+  font-family: 'Oswald', 'Arial Narrow', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--hud-brass);
+}
+
+.hud-dial {
+  background: radial-gradient(circle at 50% 40%, #2b2f36, #121418 70%);
+  border: 3px solid var(--hud-brass-dim);
+  box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.85), 0 0 0 2px #0b0c0e, 0 6px 22px rgba(0, 0, 0, 0.6);
+}
+
+.hud-bar-track {
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--hud-brass-dim);
+}
+
+.hud-dialog {
+  background: linear-gradient(180deg, #23262c, #15171b) !important;
+  color: var(--hud-text) !important;
+  border: 1px solid var(--hud-brass) !important;
+  font-family: 'Spectral', Georgia, serif;
+}
+.hud-dialog [data-slot='title'],
+.hud-dialog h2 {
+  color: var(--hud-amber);
+}
+
+.hud-paper {
+  background: linear-gradient(180deg, #d8ccb0, #c4b591);
+  color: #2a2116;
+  border: 1px solid #8a7347;
+  box-shadow: inset 0 0 30px rgba(90, 60, 20, 0.35);
+}
+
+.hud-scroll::-webkit-scrollbar { width: 8px; }
+.hud-scroll::-webkit-scrollbar-thumb { background: var(--hud-brass-dim); border-radius: 4px; }
+
+@keyframes hud-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.hud-pulse { animation: hud-pulse 1.2s ease-in-out infinite; }
+
+.hud-title-screen {
+  background:
+    radial-gradient(ellipse at 50% 70%, rgba(255, 140, 50, 0.28), transparent 55%),
+    linear-gradient(180deg, rgba(8, 12, 20, 0.55), rgba(8, 12, 20, 0.92));
+}
