@@ -1,4 +1,4 @@
-import { BASE_STORAGE, BUILDINGS, CEMETERY_CAPACITY, EVENING_END, EVENING_START, HEAT_LEVELS, MEAL_HOUR, PILE_NAMES, WORK_END, EXTENDED_END, WORK_START, generatorCoalPerHour, outsideTemp, tempToLevel } from './data'
+import { BASE_STORAGE, BUILDERS_PER_SITE, BUILDINGS, CEMETERY_CAPACITY, EVENING_END, EVENING_START, HEAT_LEVELS, MEAL_HOUR, PILE_NAMES, SCHOOL_CAPACITY, SECONDS_PER_HOUR, STUDY_HOURS_PER_ENGINEER, WORK_END, EXTENDED_END, WORK_START, generatorCoalPerHour, outsideTemp, tempToLevel } from './data'
 import type { Building, GameState, LogEntry, ResourceKey } from './types'
 
 export const RELAY_RADIUS = 11
@@ -156,20 +156,33 @@ export function killPeople(s: GameState, n: number, cause: string) {
 const WORK_SICK = [0.01, 0.005, 0.0018, 0.0005, 0, 0]
 const HOME_SICK = [0.014, 0.007, 0.0025, 0.0006, 0, 0]
 
+/** Person-hours citizens actually spent at a workplace during the last hour. */
+export function hoursOnSite(map: Record<string, number>, cellId: string): number {
+  return (map[cellId] ?? 0) / SECONDS_PER_HOUR
+}
+
 export function runHour(s: GameState) {
   s.stats.caps = storageCaps(s)
   const hour = Math.round(s.time) % 24
+  // The hour that just ended: citizens worked (or not) during it
+  const working = isWorkHour(s, (hour + 23) % 24)
   const pop = totalPop(s)
-  const healthFactor = pop > 0 ? clamp(1 - (s.sick + s.gravelyIll) / pop, 0, 1) : 0
   const sickMult = s.laws.includes('fillers') ? 1.25 : 1
   let newSick = 0
 
-  // 1. Construction
+  // 1. Construction: progress only with builders on site
   for (const b of s.buildings) {
     if (b.built) continue
-    b.progress += 1
+    const crew = Math.min(BUILDERS_PER_SITE, hoursOnSite(s.buildPresence, b.cellId))
+    b.present = Math.round(crew)
+    b.active = false
+    if (crew < 0.05) { b.status = working ? 'Ждёт свободных строителей' : 'Стройка стоит: вне смены'; continue }
+    b.progress += crew / BUILDERS_PER_SITE
+    b.status = 'Идёт строительство'
     if (b.progress >= BUILDINGS[b.type].buildHours) {
       b.built = true
+      b.progress = BUILDINGS[b.type].buildHours
+      b.present = 0
       addLog(s, `Построено: ${BUILDINGS[b.type].name}.`, 'good')
     }
   }
@@ -204,13 +217,12 @@ export function runHour(s: GameState) {
   // 3. Heat for all buildings
   for (const b of s.buildings) b.heat = buildingHeat(s, b)
 
-  // 4. Work
-  const working = isWorkHour(s, hour)
+  // 4. Work: output depends on the people who actually showed up
   let research = 0
   for (const b of s.buildings) {
     const def = BUILDINGS[b.type]
+    if (!b.built) continue
     b.active = false
-    if (!b.built) { b.status = 'Строится'; continue }
     if (!def.workerKind) {
       if (b.type === 'relay') {
         b.active = relayActive(s, b)
@@ -225,11 +237,14 @@ export function runHour(s: GameState) {
     if (def.capacity) continue
     if (b.type === 'aid' || b.type === 'hospital') continue
     if (b.type === 'cemetery' || b.type === 'arena' || b.type === 'pub') continue
-    if (b.assigned === 0) { b.status = 'Нет рабочих'; continue }
-    if (!working) { b.status = 'Вне смены'; continue }
+    if (b.type === 'beacon' || b.type === 'school') continue
+    if (b.assigned === 0) { b.status = 'Нет рабочих'; b.present = 0; continue }
+    const here = hoursOnSite(s.presence, b.cellId)
+    b.present = Math.min(b.assigned, Math.round(here))
+    const eff = Math.min(b.assigned, here)
+    if (eff < 0.05) { b.status = working ? 'Рабочие в пути' : 'Вне смены'; continue }
     b.active = true
-    const eff = b.assigned * healthFactor
-    newSick += b.assigned * (WORK_SICK[b.heat] ?? 0) * sickMult
+    newSick += eff * (WORK_SICK[b.heat] ?? 0) * sickMult
     const produce = (key: ResourceKey, amount: number, label: string) => {
       if (roomFor(s, key) <= 0) { b.status = 'Склады переполнены'; b.active = false; return }
       addRes(s, key, amount)
@@ -271,17 +286,19 @@ export function runHour(s: GameState) {
   }
   for (const p of s.piles) {
     if (p.assigned === 0 || p.amount <= 0) { if (p.amount <= 0) p.assigned = 0; continue }
-    if (!working) continue
+    const eff = Math.min(p.assigned, hoursOnSite(s.presence, p.cellId))
+    if (eff < 0.05) continue
     const cell = s.cells.get(p.cellId)
     const heat = heatAt(s, p.x, p.z, cell?.ring ?? 9, 0, 'other')
-    newSick += p.assigned * (WORK_SICK[heat] ?? 0) * sickMult
-    const take = Math.min(p.assigned * healthFactor * 0.8, p.amount)
+    newSick += eff * (WORK_SICK[heat] ?? 0) * sickMult
+    const take = Math.min(eff * 0.8, p.amount)
     p.amount -= addRes(s, p.kind, take)
   }
-  s.stats.researchPerHour = working ? research : 0
+  s.stats.researchPerHour = research
 
-  // 4b. Society: cemetery, arena, pub
+  // 4b. Society: cemetery, arena, pub; beacon and school
   runSociety(s, hour, working, pop)
+  runSchools(s, working)
 
   // 5. Research
   if (s.researching && research > 0) {
@@ -415,6 +432,48 @@ export function runHour(s: GameState) {
   clampToStorage(s)
   s.history.push({ ...s.resources })
   if (s.history.length > 25) s.history.shift()
+  // Presence has been consumed: start counting the next hour
+  s.presence = {}
+  s.buildPresence = {}
+  s.studyPresence = {}
+}
+
+/** Teachers on site + pupils in class = study hours; enough of them turn a child into an engineer. */
+function runSchools(s: GameState, working: boolean) {
+  const youth = s.laws.includes('youthLabor')
+  for (const b of s.buildings) {
+    if (!b.built) continue
+    if (b.type === 'beacon') {
+      const max = BUILDINGS.beacon.maxWorkers ?? 5
+      b.active = s.expedition !== null
+      b.present = s.expedition ? 0 : b.assigned
+      b.status = s.expedition ? 'Разведчики в пути' : b.assigned >= max ? 'Отряд готов к выходу' : `Нужно ${max} разведчиков`
+      continue
+    }
+    if (b.type !== 'school') continue
+    b.active = false
+    const teachers = hoursOnSite(s.presence, b.cellId)
+    const pupils = Math.min(SCHOOL_CAPACITY, hoursOnSite(s.studyPresence, b.cellId))
+    b.present = Math.round(teachers)
+    b.stored = Math.round(pupils)
+    if (youth) { b.status = 'Закрыта: дети работают'; continue }
+    if (b.assigned === 0) { b.status = 'Нет учителей'; continue }
+    if (teachers < 0.05) { b.status = working ? 'Учителя в пути' : 'Уроки окончены'; continue }
+    if (pupils < 0.05) { b.status = s.pop.children > 0 ? 'Ждёт учеников' : 'Некого учить'; continue }
+    const staffed = Math.min(1, teachers / (BUILDINGS.school.maxWorkers ?? 3))
+    s.studyProgress += pupils * staffed
+    s.hope = clamp(s.hope + 0.01 * staffed, 0, 100)
+    b.active = true
+    b.status = 'Идут уроки'
+  }
+  while (s.studyProgress >= STUDY_HOURS_PER_ENGINEER && s.pop.children > 0) {
+    s.studyProgress -= STUDY_HOURS_PER_ENGINEER
+    s.pop.children--
+    s.pop.engineers++
+    s.hope = clamp(s.hope + 1, 0, 100)
+    addLog(s, 'Выпускник школы стал инженером.', 'good')
+  }
+  if (s.pop.children === 0) s.studyProgress = 0
 }
 
 function runSociety(s: GameState, hour: number, working: boolean, pop: number) {
@@ -428,8 +487,10 @@ function runSociety(s: GameState, hour: number, working: boolean, pop: number) {
       if (b.assigned === 0) { b.status = 'Нет могильщиков'; continue }
       if (b.stored >= CEMETERY_CAPACITY) { b.status = 'Кладбище заполнено'; continue }
       if (s.corpses < 0.5) { b.status = `Могил: ${Math.floor(b.stored)}/${CEMETERY_CAPACITY}`; continue }
-      if (!working) { b.status = 'Вне смены'; continue }
-      const bury = Math.min(s.corpses, b.assigned * 0.5, CEMETERY_CAPACITY - b.stored)
+      const diggers = Math.min(b.assigned, hoursOnSite(s.presence, b.cellId))
+      b.present = Math.round(diggers)
+      if (diggers < 0.05) { b.status = working ? 'Могильщики в пути' : 'Вне смены'; continue }
+      const bury = Math.min(s.corpses, diggers * 0.5, CEMETERY_CAPACITY - b.stored)
       s.corpses -= bury
       b.stored += bury
       b.active = true
