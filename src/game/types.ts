@@ -19,6 +19,8 @@ export type BuildingType =
   | 'cemetery'
   | 'arena'
   | 'pub'
+  | 'beacon'
+  | 'school'
 
 export type ResourceKey = 'coal' | 'wood' | 'steel' | 'rawFood' | 'rations'
 export type PileKind = 'coal' | 'wood' | 'steel'
@@ -46,6 +48,8 @@ export interface BuildingDef {
   onDeposit?: PileKind
   /** Extra storage capacity provided once built */
   storage?: Partial<Record<ResourceKey, number>>
+  /** Only one may exist in the city */
+  unique?: boolean
 }
 
 export interface Cell {
@@ -89,6 +93,8 @@ export interface Building {
   heat: number
   /** Graves filled (cemetery only) */
   stored: number
+  /** People actually on site during the last hour (workers, or builders while under construction) */
+  present: number
 }
 
 export interface Pile {
@@ -127,6 +133,8 @@ export interface PendingEvent {
   title: string
   text: string
   choices: EventChoice[]
+  /** Randomised parameters of this occurrence (sizes, amounts), used when the choice is applied */
+  data?: Record<string, number>
 }
 
 export interface ActivePromise {
@@ -141,6 +149,12 @@ export interface LogEntry {
   time: number
   text: string
   tone: 'info' | 'good' | 'warn' | 'bad'
+}
+
+export interface Expedition {
+  siteId: string
+  startedAt: number
+  returnAt: number
 }
 
 export type Selection =
@@ -185,7 +199,24 @@ export interface GameState {
   lastLawAt: number
   shiftMode: 'normal' | 'extended'
   firedEvents: string[]
+  /** Time of the last random event */
+  lastEventAt: number
+  /** Last time each random event fired (for cooldowns) */
+  eventLog: Record<string, number>
   objectivesDone: string[]
+  /** Scouts out on an expedition from the beacon */
+  expedition: Expedition | null
+  /** Expedition sites already explored */
+  explored: string[]
+  /** Accumulated child study-hours towards the next graduate engineer */
+  studyProgress: number
+  /**
+   * Seconds of in-game time citizens actually spent on site during the current hour,
+   * keyed by cell id. Filled by the citizen simulation, consumed and reset every hour.
+   */
+  presence: Record<string, number>
+  buildPresence: Record<string, number>
+  studyPresence: Record<string, number>
   pendingEvent: PendingEvent | null
   promise: ActivePromise | null
   log: LogEntry[]
