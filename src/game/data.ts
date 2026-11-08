@@ -42,6 +42,33 @@ export const CEMETERY_CAPACITY = 40
 export const EVENING_START = 18
 export const EVENING_END = 23
 
+/** A construction site advances one build-hour per hour with this many builders on site */
+export const BUILDERS_PER_SITE = 4
+/** Pupils per school */
+export const SCHOOL_CAPACITY = 10
+/** Child study-hours needed for one child to become an engineer */
+export const STUDY_HOURS_PER_ENGINEER = 60
+
+export interface ExpeditionSite {
+  id: string
+  name: string
+  description: string
+  /** Hours one way */
+  hours: number
+  /** Chance a scout comes back frostbitten */
+  danger: number
+  reward: { coal?: number; wood?: number; steel?: number; rawFood?: number; workers?: number; engineers?: number; children?: number }
+}
+
+export const EXPEDITION_SITES: ExpeditionSite[] = [
+  { id: 'hunting', name: 'Охотничьи угодья', hours: 5, danger: 0.1, description: 'Звериные тропы у подножия хребта.', reward: { rawFood: 70 } },
+  { id: 'depot', name: 'Заброшенный склад', hours: 7, danger: 0.15, description: 'Полузанесённый снегом склад старой экспедиции.', reward: { coal: 140, rawFood: 30 } },
+  { id: 'train', name: 'Разбитый поезд', hours: 9, danger: 0.2, description: 'Состав сошёл с рельсов в ущелье. Вагоны полны досок и стали.', reward: { wood: 110, steel: 50 } },
+  { id: 'village', name: 'Шахтёрский посёлок', hours: 11, danger: 0.25, description: 'Дым над крышами? Возможно, там ещё кто-то жив.', reward: { coal: 120, workers: 8, children: 3 } },
+  { id: 'camp', name: 'Лагерь беженцев', hours: 13, danger: 0.3, description: 'Сигнальные огни далеко на юге.', reward: { workers: 12, engineers: 2, children: 5 } },
+  { id: 'airship', name: 'Рухнувший дирижабль', hours: 16, danger: 0.35, description: 'Остов гигантского дирижабля на леднике.', reward: { steel: 100, engineers: 4 } },
+]
+
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   tent: {
     type: 'tent', name: 'Палатка', category: 'housing', buildHours: 2,
@@ -143,6 +170,16 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     description: 'Самогон и тёплый очаг. Вечером снижает недовольство и поднимает надежду, тратит сырую еду. 5 рабочих.',
     cost: { wood: 30, steel: 5 }, insulation: 1, workerKind: 'workers', maxWorkers: 5, requiresLaw: 'pub',
   },
+  beacon: {
+    type: 'beacon', name: 'Маяк', category: 'tech', buildHours: 6,
+    description: 'Собирает отряд из 5 разведчиков и отправляет его в экспедиции за ресурсами и выжившими. Только один на город.',
+    cost: { wood: 30, steel: 10 }, insulation: 0, workerKind: 'workers', maxWorkers: 5, requires: 'beacon', unique: true,
+  },
+  school: {
+    type: 'school', name: 'Школа инженеров', category: 'tech', buildHours: 5,
+    description: 'Инженеры учат до 10 детей; выпускники становятся инженерами. Не работает, если дети трудятся. 3 инженера.',
+    cost: { wood: 30, steel: 5 }, insulation: 1, workerKind: 'engineers', maxWorkers: 3, requires: 'school',
+  },
 }
 
 export const CATEGORIES: { id: BuildCategory; label: string }[] = [
@@ -171,6 +208,8 @@ export const RESEARCH: ResearchDef[] = [
   { id: 'bunkhouse', name: 'Деревянные бараки', tier: 1, points: 40, cost: { wood: 20 }, description: 'Открывает утеплённые бараки (+1 к теплу).' },
   { id: 'depotPlus', name: 'Грузовые сани', tier: 1, points: 35, cost: { wood: 15 }, description: 'Склады сбора работают на 40% быстрее.' },
   { id: 'huntGear', name: 'Охотничье снаряжение', tier: 1, points: 45, cost: { wood: 20 }, description: 'Хижины охотников приносят на 50% больше еды.' },
+  { id: 'beacon', name: 'Маяк', tier: 1, points: 40, cost: { wood: 20 }, description: 'Открывает маяк и экспедиции разведчиков за пределы кратера.' },
+  { id: 'school', name: 'Школа инженеров', tier: 2, points: 60, cost: { wood: 25, steel: 5 }, description: 'Открывает школу: дети учатся и становятся инженерами.' },
   { id: 'relay', name: 'Тепловой узел', tier: 2, points: 55, cost: { wood: 20, steel: 5 }, requires: 'heaters', description: 'Открывает тепловые узлы, которые греют здания вокруг.' },
   { id: 'sawmill', name: 'Ледяная лесопилка', tier: 2, points: 50, cost: { wood: 15, steel: 5 }, description: 'Открывает ледяную лесопилку.' },
   { id: 'drill', name: 'Угольный бур', tier: 2, points: 60, cost: { wood: 20, steel: 5 }, description: 'Открывает угольный бур.' },
