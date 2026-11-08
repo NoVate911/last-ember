@@ -10,7 +10,7 @@ export type V3 = [number, number, number]
 /** What a building model exposes to the renderer beyond its static meshes. */
 export interface Built {
   animated?: THREE.Object3D
-  animKind?: 'piston' | 'spin'
+  animKind?: 'piston' | 'spin' | 'turn'
   chimney?: THREE.Vector3
 }
 
