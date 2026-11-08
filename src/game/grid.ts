@@ -55,6 +55,7 @@ export function buildCells(): Map<string, Cell> {
         thetaStart,
         thetaLength,
         occupant: null,
+        deposit: null,
         road: SPOKE_ANGLES.some((sa) => angleInSpan(sa, thetaStart, thetaLength)),
       })
     }
