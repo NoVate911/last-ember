@@ -1,15 +1,16 @@
 import type { ReactNode } from 'react'
 import { Flame, Gauge, Minus, Plus, Power, Trash2, X, Zap, Pickaxe } from 'lucide-react'
-import { BUILDINGS, CEMETERY_CAPACITY, HEAT_LEVELS, PILE_TITLES, RESOURCE_NAMES, generatorCoalPerHour } from '../../../game/data'
+import { BUILDERS_PER_SITE, BUILDINGS, CEMETERY_CAPACITY, HEAT_LEVELS, PILE_TITLES, RESOURCE_NAMES, generatorCoalPerHour } from '../../../game/data'
 import { heatAt } from '../../../game/simulation'
 import type { ResourceKey } from '../../../game/types'
 import { BUILDING_ICONS } from './icons'
+import { BeaconSection, SchoolSection } from './SpecialPanels'
 import { fmt, useGame } from './useGame'
 
 function HeatBadge({ level }: { level: number }) {
   const h = HEAT_LEVELS[level] ?? HEAT_LEVELS[0]
   return (
-    <span className="hud-font rounded px-2 py-0.5 text-xs text-[#111]" style=undefined>
+    <span className="hud-font rounded px-2 py-0.5 text-xs text-[#111]" style={{ background: h.color }}>
       {h.name}
     </span>
   )
@@ -94,7 +95,7 @@ function GeneratorPanel() {
             <span className={`hud-font ${g.stress > 70 ? 'hud-pulse text-[#ff6b55]' : ''}`}>{Math.round(g.stress)}%</span>
           </div>
           <div className="hud-bar-track h-2.5 overflow-hidden rounded-sm">
-            <div className="h-full transition-all" style=undefined />
+            <div className="h-full transition-all" style={{ width: `${g.stress}%`, background: g.stress > 70 ? '#ff6b55' : '#ffad4a' }} />
           </div>
         </div>
         <div className="hud-section-title">Уголь</div>
@@ -122,8 +123,12 @@ function BuildingPanel({ id }: { id: number }) {
           <div>
             <div className="mb-1 text-xs text-[#8ea3b8]">Строительство {Math.floor(pct)}%</div>
             <div className="hud-bar-track h-2 overflow-hidden rounded-sm">
-              <div className="h-full bg-[#ffad4a]" style=undefined />
+              <div className="h-full bg-[#ffad4a]" style={{ width: `${pct}%` }} />
             </div>
+            <div className="mt-2"><Row label="Строителей на площадке" value={`${b.present}/${BUILDERS_PER_SITE}`} /></div>
+            <p className="mt-1 text-[11px] leading-snug text-[#8ea3b8]">
+              Строят свободные жители — те, кто не назначен на работу. Стройка идёт только в рабочие часы и только пока люди на месте.
+            </p>
           </div>
         )}
         {def.workerKind && def.maxWorkers && (
@@ -137,8 +142,11 @@ function BuildingPanel({ id }: { id: number }) {
               onChange={(d) => game.assign({ kind: 'building', id: b.id }, d)}
             />
             {!b.built && <div className="text-[11px] text-[#8ea3b8]">Людей можно назначить заранее.</div>}
+            {b.built && !['beacon', 'aid', 'hospital', 'arena', 'pub'].includes(b.type) && <Row label="На месте за последний час" value={`${b.present}/${b.assigned}`} />}
           </>
         )}
+        {b.type === 'beacon' && <BeaconSection b={b} />}
+        {b.type === 'school' && <SchoolSection b={b} />}
         {(def.capacity || def.storage || b.type === 'cemetery') && <div className="hud-section-title">Сведения</div>}
         {def.capacity && (
           <>
@@ -181,7 +189,7 @@ function PilePanel({ id }: { id: number }) {
       <Header icon={<Pickaxe />} title={PILE_TITLES[p.kind]} status={`Осталось: ${fmt(p.amount)} из ${p.max}`} badge={<HeatBadge level={heat} />} />
       <div className="flex flex-col gap-3 p-4">
         <div className="hud-bar-track h-2 overflow-hidden rounded-sm">
-          <div className="h-full bg-[#ffad4a]" style=undefined />
+          <div className="h-full bg-[#ffad4a]" style={{ width: `${(p.amount / p.max) * 100}%` }} />
         </div>
         <div className="hud-section-title">Сборщики</div>
         <Stepper label="Рабочие" value={p.assigned} max={5} free={s.stats.freeWorkers} onChange={(d) => game.assign({ kind: 'pile', id: p.id }, d)} />
