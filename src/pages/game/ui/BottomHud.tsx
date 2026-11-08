@@ -42,7 +42,7 @@ export function BuildMenu() {
   const s = game.state
   const items = Object.values(BUILDINGS).filter((b) => b.category === cat)
   return (
-    <div className="hud-panel pointer-events-auto rounded-md px-3 pb-2.5 pt-2">
+    <div className="hud-panel pointer-events-auto max-w-[760px] rounded-md px-3 pb-2.5 pt-2">
       <div className="mb-2 flex flex-wrap justify-center gap-1">
         {CATEGORIES.map((c) => (
           <button key={c.id} type="button" className="hud-btn rounded px-2.5 py-1 text-[11px]" data-active={cat === c.id} onClick={() => setCat(c.id)}>
@@ -50,7 +50,7 @@ export function BuildMenu() {
           </button>
         ))}
       </div>
-      <div className="flex min-h-[96px] justify-center gap-2">
+      <div className="flex min-h-[96px] flex-wrap justify-center gap-2">
         {items.map((def) => {
           const lock = game.lockReason(def.type)
           const affordable = game.canAfford(def.type)
@@ -65,7 +65,7 @@ export function BuildMenu() {
                   <div>{def.description}</div>
                   {lock && <div className="mt-1 text-[#ff6b55]">{lock}.</div>}
                   {def.onDeposit && <div className="mt-1 text-[#8ec5ff]">Ставится на месторождение (на месте кучи).</div>}
-                  <div className="mt-1 text-[#8ea3b8]">Время строительства: {def.buildHours} ч</div>
+                  <div className="mt-1 text-[#8ea3b8]">Время строительства: {def.buildHours} ч при 4 строителях</div>
                 </>
               }
             >
