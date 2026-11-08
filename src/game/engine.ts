@@ -1,13 +1,19 @@
-import { BUILDINGS, FINAL_DAY, LAWS, LAW_COOLDOWN_HOURS, PILE_NAMES, RESEARCH, START_HOUR } from './data'
+import { BASE_STORAGE, BUILDINGS, FINAL_DAY, LAWS, LAW_COOLDOWN_HOURS, PILE_NAMES, RESEARCH, SECONDS_PER_HOUR, START_HOUR } from './data'
 import { checkEnd, checkEvents, checkPromise, resolveEvent } from './events'
 import { buildCells, mulberry32 } from './grid'
+import { checkObjectives } from './objectives'
+import { type SaveSlot, saveGame } from './save'
 import {
-  addLog, assignedOf, availableWorkers, buildingHeat, clamp, reconcileWorkforce, runHour, totalPop,
+  addLog, addRes, assignedOf, availableWorkers, buildingHeat, clamp, reconcileWorkforce, runHour, storageCaps, totalPop,
 } from './simulation'
-import type { BuildingType, GameState, Pile, PileKind, UiState } from './types'
+import type { Building, BuildingType, GameState, Pile, PileKind, UiState } from './types'
 
-const HOURS_PER_SECOND = 1 / 3
+const HOURS_PER_SECOND = 1 / SECONDS_PER_HOUR
 const FINAL_TIME = (FINAL_DAY - 1) * 24 + START_HOUR
+
+function freshUi(): UiState {
+  return { placing: null, selected: null, heatOverlay: false, hoverCellId: null, dialog: null, buildOpen: false }
+}
 
 function createInitialState(): GameState {
   const cells = buildCells()
@@ -26,6 +32,7 @@ function createInitialState(): GameState {
       const amount = Math.round(range[0]! + rand() * (range[1]! - range[0]!))
       piles.push({ id, kind, cellId: c.id, x: c.x, z: c.z, amount, max: amount, assigned: 0 })
       c.occupant = { kind: 'pile', id }
+      c.deposit = kind
       id++
       break
     }
@@ -42,6 +49,7 @@ function createInitialState(): GameState {
     hungry: 0,
     hungerStreak: 0,
     deaths: 0,
+    corpses: 0,
     amputees: 0,
     hope: 55,
     discontent: 10,
@@ -56,6 +64,7 @@ function createInitialState(): GameState {
     lastLawAt: -999,
     shiftMode: 'normal',
     firedEvents: [],
+    objectivesDone: [],
     pendingEvent: null,
     promise: null,
     log: [],
@@ -64,7 +73,7 @@ function createInitialState(): GameState {
     nextId: 1000,
     stats: {
       housed: 0, homeless: 80, homeHeatAvg: 0, coldHomes: 80, coalPerHour: 0,
-      researchPerHour: 0, freeWorkers: 45, freeEngineers: 15, treated: 0,
+      researchPerHour: 0, freeWorkers: 45, freeEngineers: 15, treated: 0, caps: { ...BASE_STORAGE },
     },
   }
   addLog(s, 'Выжившие добрались до кратера. Разожгите генератор и постройте укрытия.', 'info')
@@ -76,7 +85,7 @@ export type ResearchStatus = 'done' | 'active' | 'available' | 'locked' | 'unaff
 
 export class Game {
   state: GameState
-  ui: UiState = { placing: null, selected: null, heatOverlay: false, hoverCellId: null, dialog: null }
+  ui: UiState = freshUi()
   version = 0
   generation = 0
   private listeners = new Set<() => void>()
@@ -103,8 +112,26 @@ export class Game {
     this.state = createInitialState()
     this.state.speed = 1
     this.generation++
-    this.ui = { placing: null, selected: null, heatOverlay: false, hoverCellId: null, dialog: null }
+    this.ui = freshUi()
     this.emit(true)
+  }
+
+  /** Replace the running game with a loaded save. The game stays paused. */
+  load(state: GameState) {
+    this.state = state
+    this.state.speed = 0
+    this.generation++
+    this.ui = freshUi()
+    this.refreshStats()
+    addLog(this.state, 'Игра загружена.', 'info')
+    this.emit(true)
+  }
+
+  save(slot: SaveSlot): boolean {
+    const ok = saveGame(slot, this.state)
+    if (slot !== 'auto') addLog(this.state, ok ? 'Игра сохранена.' : 'Не удалось сохранить игру.', ok ? 'good' : 'bad')
+    this.emit(true)
+    return ok
   }
 
   get paused(): boolean {
@@ -158,6 +185,8 @@ export class Game {
     checkPromise(s)
     checkEvents(s)
     checkEnd(s, FINAL_TIME)
+    // Autosave every morning
+    if (Math.round(s.time) % 24 === 6 && s.status === 'playing') saveGame('auto', s)
     if (s.hope < 15 && Math.round(s.time) % 6 === 0) addLog(s, 'Надежда угасает. Люди теряют веру.', 'bad')
     if (s.discontent > 85 && Math.round(s.time) % 6 === 0) addLog(s, 'Недовольство на пределе. Изгнание близко.', 'bad')
     this.emit(true)
@@ -165,8 +194,10 @@ export class Game {
 
   refreshStats() {
     const s = this.state
+    s.stats.caps = storageCaps(s)
     s.stats.freeWorkers = availableWorkers(s) - assignedOf(s, 'workers')
     s.stats.freeEngineers = s.pop.engineers - assignedOf(s, 'engineers')
+    checkObjectives(s)
   }
 
   setSpeed(speed: number) { this.state.speed = speed; this.emit(true) }
@@ -178,8 +209,19 @@ export class Game {
 
   // ---------- Construction ----------
   isUnlocked(type: BuildingType): boolean {
-    const req = BUILDINGS[type].requires
-    return !req || this.state.researched.includes(req)
+    return this.lockReason(type) === null
+  }
+
+  /** Why a building can't be built yet (missing research or law), or null. */
+  lockReason(type: BuildingType): string | null {
+    const def = BUILDINGS[type]
+    if (def.requires && !this.state.researched.includes(def.requires)) {
+      return `Нужно исследование «${RESEARCH.find((r) => r.id === def.requires)?.name ?? def.requires}»`
+    }
+    if (def.requiresLaw && !this.state.laws.includes(def.requiresLaw)) {
+      return `Нужен закон «${LAWS.find((l) => l.id === def.requiresLaw)?.name ?? def.requiresLaw}»`
+    }
+    return null
   }
 
   canAfford(type: BuildingType): boolean {
@@ -192,8 +234,12 @@ export class Game {
     const cell = this.state.cells.get(cellId)
     if (!cell) return { ok: false, reason: 'Недопустимое место' }
     if (cell.road) return { ok: false, reason: 'Здесь проходит улица' }
-    if (cell.occupant) return { ok: false, reason: 'Занято' }
-    if (!this.isUnlocked(type)) return { ok: false, reason: 'Нужно исследование' }
+    const def = BUILDINGS[type]
+    if (def.onDeposit) {
+      if (cell.deposit !== def.onDeposit) return { ok: false, reason: 'Нужно месторождение' }
+      if (cell.occupant?.kind === 'building') return { ok: false, reason: 'Занято' }
+    } else if (cell.occupant) return { ok: false, reason: 'Занято' }
+    if (!this.isUnlocked(type)) return { ok: false, reason: this.lockReason(type) ?? 'Закрыто' }
     if (!this.canAfford(type)) return { ok: false, reason: 'Не хватает материалов' }
     return { ok: true, reason: '' }
   }
@@ -206,14 +252,27 @@ export class Game {
     const def = BUILDINGS[type]
     s.resources.wood -= def.cost.wood ?? 0
     s.resources.steel -= def.cost.steel ?? 0
+    // A mine replaces the heap on its deposit: the remaining heap is hauled to storage
+    if (cell.occupant?.kind === 'pile') {
+      const pileId = cell.occupant.id
+      const pile = s.piles.find((p) => p.id === pileId)
+      if (pile) {
+        const got = addRes(s, pile.kind, pile.amount)
+        s.piles = s.piles.filter((p) => p.id !== pileId)
+        addLog(s, `Куча расчищена под шахту: +${Math.floor(got)} (${PILE_NAMES[pile.kind]}).`, 'info')
+      }
+      if (this.ui.selected?.kind === 'pile' && this.ui.selected.id === pileId) this.ui = { ...this.ui, selected: null }
+      cell.occupant = null
+    }
     const id = s.nextId++
-    const b = {
+    const b: Building = {
       id, type, cellId, x: cell.x, z: cell.z, angle: cell.angle, progress: 0, built: false,
-      assigned: 0, enabled: true, status: 'Строится', heat: 0, active: false, residents: 0,
+      assigned: 0, enabled: true, status: 'Строится', heat: 0, active: false, residents: 0, stored: 0,
     }
     b.heat = buildingHeat(s, b)
     s.buildings.push(b)
     cell.occupant = { kind: 'building', id }
+    this.refreshStats()
     this.emit(true)
     return true
   }
@@ -232,7 +291,16 @@ export class Game {
     addLog(s, `Разобрано: ${def.name}.`, 'info')
     this.ui = { ...this.ui, selected: null }
     this.refreshStats()
+    // Losing a warehouse shrinks storage: overflow is lost
+    for (const k of Object.keys(s.resources) as (keyof typeof s.resources)[]) {
+      s.resources[k] = Math.min(s.resources[k], s.stats.caps[k])
+    }
     this.emit(true)
+  }
+
+  /** Clamp a requested change to free hands when adding; removing is always allowed. */
+  private allowedDelta(delta: number, free: number): number {
+    return delta > 0 ? Math.min(delta, Math.max(0, free)) : delta
   }
 
   assign(target: { kind: 'building' | 'pile'; id: number }, delta: number) {
@@ -241,7 +309,7 @@ export class Game {
     if (target.kind === 'pile') {
       const p = s.piles.find((x) => x.id === target.id)
       if (!p || p.amount <= 0) return
-      const next = clamp(p.assigned + Math.min(delta, s.stats.freeWorkers), 0, 5)
+      const next = clamp(p.assigned + this.allowedDelta(delta, s.stats.freeWorkers), 0, 5)
       p.assigned = next
     } else {
       const b = s.buildings.find((x) => x.id === target.id)
@@ -249,7 +317,7 @@ export class Game {
       const def = BUILDINGS[b.type]
       if (!def.workerKind || !def.maxWorkers) return
       const free = def.workerKind === 'workers' ? s.stats.freeWorkers : s.stats.freeEngineers
-      b.assigned = clamp(b.assigned + Math.min(delta, free), 0, def.maxWorkers)
+      b.assigned = clamp(b.assigned + this.allowedDelta(delta, free), 0, def.maxWorkers)
     }
     this.refreshStats()
     this.emit(true)
