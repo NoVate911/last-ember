@@ -8,16 +8,16 @@ import { useGame } from './useGame'
 function MeterBar({ label, value, icon, color, glow }: { label: string; value: number; icon: ReactNode; color: string; glow: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span style=undefined>{icon}</span>
+      <span style={{ color }}>{icon}</span>
       <div className="flex-1">
         <div className="mb-0.5 flex justify-between">
           <span className="hud-font text-[10px] uppercase tracking-[0.18em] text-[#8ea3b8]">{label}</span>
           <span className="hud-font text-[11px]">{Math.round(value)}</span>
         </div>
         <div className="hud-bar-track relative h-2.5 w-72 overflow-hidden rounded-sm">
-          <div className="h-full transition-all duration-500" style=undefined />
+          <div className="h-full transition-all duration-500" style={{ width: `${value}%`, background: color, boxShadow: `0 0 10px ${glow}` }} />
           {[25, 50, 75].map((t) => (
-            <div key={t} className="absolute top-0 h-full w-px bg-black/60" style=undefined />
+            <div key={t} className="absolute top-0 h-full w-px bg-black/60" style={{ left: `${t}%` }} />
           ))}
         </div>
       </div>
@@ -30,7 +30,7 @@ function RoundButton({ label, icon, active, badge, onClick }: { label: string; i
     <Tip label={label} side="top">
       <button type="button" aria-label={label} data-active={active ?? false} className="hud-round relative flex h-14 w-14 items-center justify-center" onClick={onClick}>
         {icon}
-        {badge && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-black shadow-[0_0_6px_currentColor]" style=undefined />}
+        {badge && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-black shadow-[0_0_6px_currentColor]" style={{ background: badge, color: badge }} />}
       </button>
     </Tip>
   )
