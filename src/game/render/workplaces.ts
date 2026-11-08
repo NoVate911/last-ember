@@ -11,8 +11,9 @@ import { angDiff } from './streets'
  *  - haul:   walk between heaps and the depot carrying crates
  *  - hunt:   leave for the crater rim and come back with game
  *  - inside: work indoors, now and then carry supplies to another building
+ *  - scout:  wait at the beacon; during an expedition leave the crater until it returns
  */
-export type WorkStyle = 'dig' | 'craft' | 'haul' | 'hunt' | 'inside'
+export type WorkStyle = 'dig' | 'craft' | 'haul' | 'hunt' | 'inside' | 'scout'
 
 export function workStyle(type: BuildingType): WorkStyle {
   switch (type) {
@@ -28,6 +29,8 @@ export function workStyle(type: BuildingType): WorkStyle {
       return 'haul'
     case 'lodge':
       return 'hunt'
+    case 'beacon':
+      return 'scout'
     default:
       return 'inside'
   }

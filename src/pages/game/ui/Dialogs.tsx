@@ -96,7 +96,7 @@ export function ResearchDialog() {
                         {r.requires && st === 'locked' && ` · нужно: ${RESEARCH.find((x) => x.id === r.requires)?.name}`}
                       </div>
                       <div className="hud-bar-track mt-1.5 h-1.5 overflow-hidden rounded-sm">
-                        <div className="h-full bg-[#8ec5ff]" style=undefined />
+                        <div className="h-full bg-[#8ec5ff]" style={{ width: `${pct}%` }} />
                       </div>
                       {st === 'available' && (
                         <button type="button" disabled={!!s.researching} className="hud-btn mt-1.5 w-full rounded py-1 text-xs" onClick={() => game.startResearch(r.id)}>

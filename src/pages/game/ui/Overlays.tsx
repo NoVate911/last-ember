@@ -18,7 +18,7 @@ export function EventDialog() {
           <>
             <DialogHeader>
               <DialogTitle className="hud-font text-2xl uppercase tracking-widest text-[#ffad4a]">{ev.title}</DialogTitle>
-              <DialogDescription className="pt-2 text-base italic leading-relaxed text-[#e6edf5]">{ev.text}</DialogDescription>
+              <DialogDescription className="whitespace-pre-line pt-2 text-base italic leading-relaxed text-[#e6edf5]">{ev.text}</DialogDescription>
             </DialogHeader>
             <DialogBody>
               <div className="flex flex-col gap-2">
@@ -44,7 +44,7 @@ export function LogPanel() {
   return (
     <div className="flex flex-col gap-1">
       {entries.map((e, i) => (
-        <div key={e.id} className="hud-panel rounded px-2 py-1 text-xs" style=undefined>
+        <div key={e.id} className="hud-panel rounded px-2 py-1 text-xs" style={{ opacity: 1 - i * 0.15 }}>
           <span className="hud-font mr-1 text-[10px] text-[#8ea3b8]">{formatTime(e.time).clock}</span>
           <span className={tone[e.tone]}>{e.text}</span>
         </div>

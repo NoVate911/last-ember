@@ -325,6 +325,7 @@ export class WorldRenderer {
       vis.windowMat.emissiveIntensity = active ? (b.type === 'relay' ? 2 : (0.25 + night * 2.2) * warm) : 0
       if (vis.animated && active && simSpeed > 0) {
         if (vis.animKind === 'spin') vis.animated.rotation.z += dt * 6
+        if (vis.animKind === 'turn') vis.animated.rotation.y += dt * 0.9
         if (vis.animKind === 'piston') vis.animated.position.y = ((vis.animated.userData['baseY'] as number | undefined) ?? 0) + Math.abs(Math.sin(now() * 0.006)) * 1.2
       }
       if (vis.chimney && active) {

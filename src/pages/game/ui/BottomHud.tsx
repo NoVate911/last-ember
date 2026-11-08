@@ -8,16 +8,16 @@ import { useGame } from './useGame'
 function MeterBar({ label, value, icon, color, glow }: { label: string; value: number; icon: ReactNode; color: string; glow: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span style=undefined>{icon}</span>
+      <span style={{ color }}>{icon}</span>
       <div className="flex-1">
         <div className="mb-0.5 flex justify-between">
           <span className="hud-font text-[10px] uppercase tracking-[0.18em] text-[#8ea3b8]">{label}</span>
           <span className="hud-font text-[11px]">{Math.round(value)}</span>
         </div>
         <div className="hud-bar-track relative h-2.5 w-72 overflow-hidden rounded-sm">
-          <div className="h-full transition-all duration-500" style=undefined />
+          <div className="h-full transition-all duration-500" style={{ width: `${value}%`, background: color, boxShadow: `0 0 10px ${glow}` }} />
           {[25, 50, 75].map((t) => (
-            <div key={t} className="absolute top-0 h-full w-px bg-black/60" style=undefined />
+            <div key={t} className="absolute top-0 h-full w-px bg-black/60" style={{ left: `${t}%` }} />
           ))}
         </div>
       </div>
@@ -30,7 +30,7 @@ function RoundButton({ label, icon, active, badge, onClick }: { label: string; i
     <Tip label={label} side="top">
       <button type="button" aria-label={label} data-active={active ?? false} className="hud-round relative flex h-14 w-14 items-center justify-center" onClick={onClick}>
         {icon}
-        {badge && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-black shadow-[0_0_6px_currentColor]" style=undefined />}
+        {badge && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-black shadow-[0_0_6px_currentColor]" style={{ background: badge, color: badge }} />}
       </button>
     </Tip>
   )
@@ -42,7 +42,7 @@ export function BuildMenu() {
   const s = game.state
   const items = Object.values(BUILDINGS).filter((b) => b.category === cat)
   return (
-    <div className="hud-panel pointer-events-auto rounded-md px-3 pb-2.5 pt-2">
+    <div className="hud-panel pointer-events-auto max-w-[760px] rounded-md px-3 pb-2.5 pt-2">
       <div className="mb-2 flex flex-wrap justify-center gap-1">
         {CATEGORIES.map((c) => (
           <button key={c.id} type="button" className="hud-btn rounded px-2.5 py-1 text-[11px]" data-active={cat === c.id} onClick={() => setCat(c.id)}>
@@ -50,7 +50,7 @@ export function BuildMenu() {
           </button>
         ))}
       </div>
-      <div className="flex min-h-[96px] justify-center gap-2">
+      <div className="flex min-h-[96px] flex-wrap justify-center gap-2">
         {items.map((def) => {
           const lock = game.lockReason(def.type)
           const affordable = game.canAfford(def.type)
@@ -65,7 +65,7 @@ export function BuildMenu() {
                   <div>{def.description}</div>
                   {lock && <div className="mt-1 text-[#ff6b55]">{lock}.</div>}
                   {def.onDeposit && <div className="mt-1 text-[#8ec5ff]">Ставится на месторождение (на месте кучи).</div>}
-                  <div className="mt-1 text-[#8ea3b8]">Время строительства: {def.buildHours} ч</div>
+                  <div className="mt-1 text-[#8ea3b8]">Время строительства: {def.buildHours} ч при 4 строителях</div>
                 </>
               }
             >

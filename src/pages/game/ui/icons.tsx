@@ -1,6 +1,6 @@
 import {
   Axe, BedDouble, Beer, Boxes, Cross, Drumstick, Factory, FlaskConical, Heater, Hospital, House, Mountain,
-  Pickaxe, Soup, Stethoscope, Swords, Tent, Warehouse, Cog, TreePine, Container,
+  Pickaxe, Soup, Stethoscope, Swords, Tent, Warehouse, Cog, TreePine, Container, RadioTower, GraduationCap,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../../lib/shadcn/tooltip'
@@ -27,6 +27,8 @@ export const BUILDING_ICONS: Record<BuildingType, ReactNode> = {
   arena: <Swords className="h-6 w-6" />,
   pub: <Beer className="h-6 w-6" />,
   workshop: <FlaskConical className="h-6 w-6" />,
+  beacon: <RadioTower className="h-6 w-6" />,
+  school: <GraduationCap className="h-6 w-6" />,
 }
 
 export const RESOURCE_ICONS: Record<ResourceKey, ReactNode> = {

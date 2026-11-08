@@ -4,7 +4,8 @@ import { basePose, type Pose } from './citizenBody'
 import type { NetPos } from './streets'
 
 export type Act = 'walk' | 'inside' | 'idle' | 'warm' | 'talk' | 'shovel' | 'hammer' | 'play'
-export type Goal = 'home' | 'work' | 'build' | 'fetch' | 'errand' | 'plaza' | 'warm' | 'canteen' | 'medic' | 'visit' | 'none'
+export type Goal = 'home' | 'work' | 'build' | 'fetch' | 'errand' | 'plaza' | 'warm' | 'canteen' | 'medic' | 'rest' | 'school' | 'visit' | 'none'
+export type Role = 'worker' | 'engineer' | 'child'
 
 export interface Resume { arriveAct: Act; arriveTime: number; arriveFace: THREE.Vector3 | null; goal: Goal }
 
@@ -33,7 +34,13 @@ export interface Citizen {
   active: boolean
   workCycles: number
   chatCooldown: number
-  adultIndex: number
+  /** Population group this person belongs to (re-derived every frame from the city population) */
+  role: Role
+  /** Index inside the role group: decides which job / site / school seat the person takes */
+  roleIdx: number
+  /** Reached the workplace or site and is now on shift (presence counts toward output) */
+  onShift: boolean
+  sick: boolean
   /** Construction site / workplace slot so co-workers spread around a building */
   slot: number
   /** Cell id of the workplace or construction site the citizen is attached to */
@@ -47,7 +54,7 @@ export function buildPose(p: Pose, w: Citizen, i: number, t: number, simDt: numb
   p.z = w.pos.z
   p.yaw = w.yaw
   p.scale = w.scale
-  p.pack = w.pack
+  p.pack = w.pack && !w.child
   p.beard = !w.child && w.seed > 0.62
   p.goggles = !w.child && w.seed > 0.3 && w.seed < 0.45
   const off = w.seed * 50

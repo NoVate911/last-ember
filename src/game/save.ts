@@ -83,13 +83,21 @@ export function loadGame(slot: SaveSlot): GameState | null {
     const st = file.state
     const cells = new Map<string, Cell>()
     for (const c of st.cells) cells.set(c.id, { ...c, deposit: c.deposit ?? null })
-    const buildings: Building[] = st.buildings.map((b) => ({ ...b, stored: b.stored ?? 0 }))
+    const buildings: Building[] = st.buildings.map((b) => ({ ...b, stored: b.stored ?? 0, present: b.present ?? 0 }))
     return {
       ...st,
       cells,
       buildings,
       corpses: st.corpses ?? 0,
       objectivesDone: st.objectivesDone ?? [],
+      expedition: st.expedition ?? null,
+      explored: st.explored ?? [],
+      studyProgress: st.studyProgress ?? 0,
+      lastEventAt: st.lastEventAt ?? st.time,
+      eventLog: st.eventLog ?? {},
+      presence: st.presence ?? {},
+      buildPresence: st.buildPresence ?? {},
+      studyPresence: st.studyPresence ?? {},
       speed: 0,
       stats: { ...st.stats, caps: st.stats.caps ?? { ...BASE_STORAGE } },
     }

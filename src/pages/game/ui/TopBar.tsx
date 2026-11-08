@@ -1,6 +1,6 @@
-import { Baby, FastForward, FlaskConical, HardHat, HeartPulse, Menu, Pause, Play, Save, ScrollText, Skull, Soup, Tent, Thermometer, Wrench, Ghost } from 'lucide-react'
+import { Baby, Compass, FastForward, FlaskConical, HardHat, HeartPulse, Menu, Pause, Play, Save, ScrollText, Skull, Soup, Tent, Thermometer, Wrench, Ghost } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { HEAT_LEVELS, RESEARCH, RESOURCE_NAMES, SECONDS_PER_HOUR, baseTempForDay, formatTime, isStorm, outsideTemp, tempToLevel } from '../../../game/data'
+import { EXPEDITION_SITES, HEAT_LEVELS, RESEARCH, RESOURCE_NAMES, SECONDS_PER_HOUR, baseTempForDay, formatTime, isStorm, outsideTemp, tempToLevel } from '../../../game/data'
 import type { ResourceKey } from '../../../game/types'
 import { RESOURCE_ICONS, Tip } from './icons'
 import { fmt, useGame } from './useGame'
@@ -62,11 +62,11 @@ function Dial() {
   return (
     <div className="flex flex-col items-center">
       <div className="hud-dial relative -mt-1 flex h-[118px] w-[118px] flex-col items-center justify-center rounded-full">
-        <div className="absolute inset-1.5 rounded-full border border-dashed border-white/20" style=undefined>
+        <div className="absolute inset-1.5 rounded-full border border-dashed border-white/20" style={{ transform: `rotate(${hourAngle}deg)` }}>
           <div className="absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 rounded-full bg-[#ffad4a] shadow-[0_0_8px_#ffad4a]" />
         </div>
         <Thermometer className="h-4 w-4 text-[#8ea3b8]" />
-        <div className="hud-font text-[34px] font-semibold leading-none" style=undefined>{temp}°</div>
+        <div className="hud-font text-[34px] font-semibold leading-none" style={{ color: levelColor(temp) }}>{temp}°</div>
         <div className="hud-font mt-0.5 text-[11px] text-[#8ea3b8]">{isStorm(s.time) ? <span className="hud-pulse text-[#ff6b55]">БУРЯ</span> : 'СНАРУЖИ'}</div>
       </div>
       <div className="hud-strip -mt-2 flex items-center gap-1 rounded-b px-2 pb-1 pt-2.5">
@@ -86,7 +86,9 @@ function Dial() {
 function StatusPills() {
   const s = useGame().state
   const research = s.researching ? RESEARCH.find((r) => r.id === s.researching) : undefined
-  if (!s.promise && !research) return null
+  const exp = s.expedition
+  const site = exp ? EXPEDITION_SITES.find((x) => x.id === exp.siteId) : undefined
+  if (!s.promise && !research && !exp) return null
   return (
     <div className="mt-1.5 flex flex-col items-center gap-1">
       {s.promise && (
@@ -102,8 +104,15 @@ function StatusPills() {
           <FlaskConical className="h-3.5 w-3.5 text-[#8ec5ff]" />
           <span>{research.name}</span>
           <div className="hud-bar-track h-1.5 w-24 overflow-hidden rounded">
-            <div className="h-full bg-[#8ec5ff]" style=undefined />
+            <div className="h-full bg-[#8ec5ff]" style={{ width: `${Math.min(100, (s.researchProgress / research.points) * 100)}%` }} />
           </div>
+        </div>
+      )}
+      {exp && site && (
+        <div className="hud-panel flex items-center gap-2 rounded px-3 py-1 text-xs">
+          <Compass className="h-3.5 w-3.5 text-[#ffad4a]" />
+          <span>Разведка: {site.name}</span>
+          <span className="hud-font text-[#ffad4a]">{Math.max(0, Math.ceil(exp.returnAt - s.time))} ч</span>
         </div>
       )}
     </div>
@@ -135,7 +144,7 @@ function Forecast() {
           {forecast.map((f) => (
             <div key={f.day} className="flex w-[74px] items-center justify-between rounded bg-black/40 px-1.5 py-0.5">
               <span className="hud-font text-[10px] text-[#8ea3b8]">Д{f.day}</span>
-              <span className="hud-font text-xs" style=undefined>{f.t}°</span>
+              <span className="hud-font text-xs" style={{ color: levelColor(f.t) }}>{f.t}°</span>
             </div>
           ))}
         </div>
