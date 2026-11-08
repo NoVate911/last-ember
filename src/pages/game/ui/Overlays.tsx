@@ -18,7 +18,7 @@ export function EventDialog() {
           <>
             <DialogHeader>
               <DialogTitle className="hud-font text-2xl uppercase tracking-widest text-[#ffad4a]">{ev.title}</DialogTitle>
-              <DialogDescription className="pt-2 text-base italic leading-relaxed text-[#e6edf5]">{ev.text}</DialogDescription>
+              <DialogDescription className="whitespace-pre-line pt-2 text-base italic leading-relaxed text-[#e6edf5]">{ev.text}</DialogDescription>
             </DialogHeader>
             <DialogBody>
               <div className="flex flex-col gap-2">
