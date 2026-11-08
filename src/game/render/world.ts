@@ -6,7 +6,7 @@ import { GEN_RADIUS, RING_COUNT, RING_WIDTH, SPOKE_ANGLES, cellIdAt, isGenerator
 import { heatAt } from '../simulation'
 import type { BuildingType, Cell } from '../types'
 import { SmokeSystem, SnowSystem, createForest, createTerrain } from './effects'
-import { type BuildingVisual, createBuildingMesh, createGenerator, createPileMesh, createScaffold } from './meshes'
+import { type BuildingVisual, createBuildingMesh, createDepositMark, createGenerator, createPileMesh, createScaffold } from './meshes'
 import { Walkers } from './walkers'
 
 function smooth(a: number, b: number, x: number) {
@@ -37,6 +37,8 @@ export class WorldRenderer {
   private generator = createGenerator()
   private buildings = new Map<number, BuildingEntry>()
   private piles = new Map<number, THREE.Group>()
+  private deposits = new Map<string, THREE.Group>()
+  private depositVersion = -1
   private overlay = new Map<string, THREE.Mesh>()
   private overlayGroup = new THREE.Group()
   private overlayVersion = -1
@@ -59,8 +61,12 @@ export class WorldRenderer {
   private skyNight = new THREE.Color(0x0a1220)
   private skyStorm = new THREE.Color(0x4a5562)
   private tmpColor = new THREE.Color()
+  private container: HTMLElement
+  private game: Game
 
-  constructor(private container: HTMLElement, private game: Game) {
+  constructor(container: HTMLElement, game: Game) {
+    this.container = container
+    this.game = game
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.shadowMap.enabled = true
@@ -117,6 +123,7 @@ export class WorldRenderer {
     el.addEventListener('contextmenu', this.onContext)
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
+    window.addEventListener('blur', this.onBlur)
     this.ro = new ResizeObserver(() => this.resize())
     this.ro.observe(container)
     this.resize()
@@ -199,22 +206,27 @@ export class WorldRenderer {
     if (!p) return
     const cellId = cellIdAt(p.x, p.z)
     if (ui.placing) {
-      if (cellId) this.game.place(ui.placing, cellId)
-      if (!e.shiftKey && !this.game.canAfford(ui.placing)) this.game.setUi({ placing: null })
+      const ok = cellId ? this.game.place(ui.placing, cellId) : false
+      // Shift keeps the tool active for building several in a row
+      if (ok && (!e.shiftKey || !this.game.canAfford(ui.placing))) this.game.setUi({ placing: null })
       return
     }
-    if (isGeneratorAt(p.x, p.z)) { this.game.setUi({ selected: { kind: 'generator' } }); return }
+    if (isGeneratorAt(p.x, p.z)) { this.game.setUi({ selected: { kind: 'generator' }, buildOpen: false }); return }
     const occ = cellId ? this.game.state.cells.get(cellId)?.occupant : null
-    this.game.setUi({ selected: occ ? { kind: occ.kind, id: occ.id } : null })
+    this.game.setUi(occ ? { selected: { kind: occ.kind, id: occ.id }, buildOpen: false } : { selected: null })
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement | null)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    // Dialogs handle their own keys (Esc closes them)
+    if (this.game.ui.dialog || this.game.state.pendingEvent) { this.keys.clear(); return }
     this.keys.add(e.key.toLowerCase())
-    if (e.key === 'Escape') this.game.setUi({ placing: null, selected: null })
+    if (e.key === 'Escape') this.game.setUi({ placing: null, selected: null, buildOpen: false })
   }
   private onKeyUp = (e: KeyboardEvent) => { this.keys.delete(e.key.toLowerCase()) }
+  /** Keys released while the window was unfocused never fire keyup: forget them. */
+  private onBlur = () => { this.keys.clear() }
 
   private panWithKeys(dt: number) {
     const fwd = new THREE.Vector3()
@@ -313,7 +325,7 @@ export class WorldRenderer {
       vis.windowMat.emissiveIntensity = active ? (b.type === 'relay' ? 2 : (0.25 + night * 2.2) * warm) : 0
       if (vis.animated && active && simSpeed > 0) {
         if (vis.animKind === 'spin') vis.animated.rotation.z += dt * 6
-        if (vis.animKind === 'piston') vis.animated.position.y = 1.6 + 1.3 + Math.abs(Math.sin(now() * 0.006)) * 1.2
+        if (vis.animKind === 'piston') vis.animated.position.y = ((vis.animated.userData['baseY'] as number | undefined) ?? 0) + Math.abs(Math.sin(now() * 0.006)) * 1.2
       }
       if (vis.chimney && active) {
         vis.group.updateMatrixWorld()
@@ -342,11 +354,29 @@ export class WorldRenderer {
       if (!seenP.has(id)) { this.scene.remove(m); this.piles.delete(id) }
     }
 
+    this.syncDeposits()
     this.syncOverlay()
     this.syncHighlights()
     this.snow.update(dt, storm ? 1 : 0.15, this.controls.target)
     this.smoke.update(dt, emitters, storm ? 8 : 1.5)
     this.walkers.update(dt, s, hour, simSpeed)
+  }
+
+  /** Ground marks on free deposit cells, so the player sees where mines can go. */
+  private syncDeposits() {
+    if (this.depositVersion === this.game.version) return
+    this.depositVersion = this.game.version
+    for (const c of this.game.state.cells.values()) {
+      const show = c.deposit !== null && c.occupant === null
+      let m = this.deposits.get(c.id)
+      if (show && !m && c.deposit) {
+        m = createDepositMark(c.deposit)
+        m.position.set(c.x, 0, c.z)
+        this.scene.add(m)
+        this.deposits.set(c.id, m)
+      }
+      if (m) m.visible = show
+    }
   }
 
   private syncOverlay() {
@@ -356,12 +386,20 @@ export class WorldRenderer {
     if (!show || this.overlayVersion === this.game.version) return
     this.overlayVersion = this.game.version
     const s = this.game.state
+    const deposit = ui.placing ? BUILDINGS[ui.placing].onDeposit : undefined
     for (const c of s.cells.values()) {
       const m = this.overlay.get(c.id)
       if (!m) continue
       const mat = m.material as THREE.MeshBasicMaterial
       if (c.road) {
         mat.opacity = 0
+        continue
+      }
+      if (deposit) {
+        // Mines: highlight matching deposits only
+        const ok = c.deposit === deposit && c.occupant?.kind !== 'building'
+        mat.color.setHex(ok ? 0x5fd38a : 0x111111)
+        mat.opacity = ok ? 0.55 : 0.25
         continue
       }
       if (ui.placing && c.occupant) {
@@ -441,6 +479,7 @@ export class WorldRenderer {
     el.removeEventListener('contextmenu', this.onContext)
     window.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('keyup', this.onKeyUp)
+    window.removeEventListener('blur', this.onBlur)
     this.ro.disconnect()
     this.controls.dispose()
     this.renderer.dispose()

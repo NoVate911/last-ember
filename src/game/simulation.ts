@@ -1,5 +1,5 @@
-import { BUILDINGS, HEAT_LEVELS, MEAL_HOUR, PILE_NAMES, WORK_END, EXTENDED_END, WORK_START, generatorCoalPerHour, outsideTemp, tempToLevel } from './data'
-import type { Building, GameState, LogEntry } from './types'
+import { BASE_STORAGE, BUILDINGS, CEMETERY_CAPACITY, EVENING_END, EVENING_START, HEAT_LEVELS, MEAL_HOUR, PILE_NAMES, WORK_END, EXTENDED_END, WORK_START, generatorCoalPerHour, outsideTemp, tempToLevel } from './data'
+import type { Building, GameState, LogEntry, ResourceKey } from './types'
 
 export const RELAY_RADIUS = 11
 export const DEPOT_RADIUS = 15
@@ -25,6 +25,36 @@ export function sr(x: number): number {
 export function addLog(s: GameState, text: string, tone: LogEntry['tone'] = 'info') {
   s.log.unshift({ id: s.nextId++, time: s.time, text, tone })
   if (s.log.length > 40) s.log.length = 40
+}
+
+/** Storage capacity per resource: base plus every finished warehouse. */
+export function storageCaps(s: GameState): Record<ResourceKey, number> {
+  const caps = { ...BASE_STORAGE }
+  for (const b of s.buildings) {
+    if (!b.built) continue
+    const extra = BUILDINGS[b.type].storage
+    if (!extra) continue
+    for (const k of Object.keys(extra) as ResourceKey[]) caps[k] += extra[k] ?? 0
+  }
+  return caps
+}
+
+/** Free space left for a resource. */
+export function roomFor(s: GameState, key: ResourceKey): number {
+  return Math.max(0, s.stats.caps[key] - s.resources[key])
+}
+
+/** Add up to `amount`, limited by storage. Returns what was actually stored. */
+export function addRes(s: GameState, key: ResourceKey, amount: number): number {
+  const added = Math.max(0, Math.min(amount, roomFor(s, key)))
+  s.resources[key] += added
+  return added
+}
+
+export function clampToStorage(s: GameState) {
+  for (const k of Object.keys(s.resources) as ResourceKey[]) {
+    s.resources[k] = Math.min(s.resources[k], s.stats.caps[k])
+  }
 }
 
 export function isWorkHour(s: GameState, hour: number): boolean {
@@ -111,6 +141,7 @@ export function killPeople(s: GameState, n: number, cause: string) {
     left--
   }
   s.deaths += killed
+  s.corpses += killed
   const hopeLoss = killed * 2 * (s.laws.includes('burial') ? 0.5 : 1)
   s.hope = clamp(s.hope - hopeLoss, 0, 100)
   s.discontent = clamp(s.discontent + killed * 0.6, 0, 100)
@@ -126,6 +157,7 @@ const WORK_SICK = [0.01, 0.005, 0.0018, 0.0005, 0, 0]
 const HOME_SICK = [0.014, 0.007, 0.0025, 0.0006, 0, 0]
 
 export function runHour(s: GameState) {
+  s.stats.caps = storageCaps(s)
   const hour = Math.round(s.time) % 24
   const pop = totalPop(s)
   const healthFactor = pop > 0 ? clamp(1 - (s.sick + s.gravelyIll) / pop, 0, 1) : 0
@@ -184,39 +216,50 @@ export function runHour(s: GameState) {
         b.active = relayActive(s, b)
         b.status = b.active ? 'Обогревает' : 'Простаивает'
       }
+      if (def.storage) {
+        b.active = true
+        b.status = 'Хранилище'
+      }
       continue
     }
     if (def.capacity) continue
     if (b.type === 'aid' || b.type === 'hospital') continue
+    if (b.type === 'cemetery' || b.type === 'arena' || b.type === 'pub') continue
     if (b.assigned === 0) { b.status = 'Нет рабочих'; continue }
     if (!working) { b.status = 'Вне смены'; continue }
     b.active = true
     const eff = b.assigned * healthFactor
     newSick += b.assigned * (WORK_SICK[b.heat] ?? 0) * sickMult
+    const produce = (key: ResourceKey, amount: number, label: string) => {
+      if (roomFor(s, key) <= 0) { b.status = 'Склады переполнены'; b.active = false; return }
+      addRes(s, key, amount)
+      b.status = label
+    }
     switch (b.type) {
       case 'depot': {
         const rate = eff * 1.2 * (has(s, 'depotPlus') ? 1.4 : 1)
         const near = s.piles
-          .filter((p) => p.amount > 0 && Math.hypot(p.x - b.x, p.z - b.z) <= DEPOT_RADIUS)
+          .filter((p) => p.amount > 0 && roomFor(s, p.kind) > 0 && Math.hypot(p.x - b.x, p.z - b.z) <= DEPOT_RADIUS)
           .sort((a, c) => Math.hypot(a.x - b.x, a.z - b.z) - Math.hypot(c.x - b.x, c.z - b.z))
         const target = near[0]
-        if (!target) { b.status = 'Нет куч в радиусе'; b.active = false; break }
-        const take = Math.min(rate, target.amount)
+        if (!target) { b.status = 'Нет куч в радиусе или склады полны'; b.active = false; break }
+        const take = addRes(s, target.kind, Math.min(rate, target.amount))
         target.amount -= take
-        s.resources[target.kind] += take
         b.status = `Доставка: ${PILE_NAMES[target.kind]}`
         break
       }
-      case 'drill': s.resources.coal += eff * 1.5; b.status = 'Добыча угля'; break
-      case 'sawmill': s.resources.wood += eff * 0.8; b.status = 'Заготовка леса'; break
-      case 'steelworks': s.resources.steel += eff * 0.5; b.status = 'Плавка стали'; break
-      case 'lodge': s.resources.rawFood += eff * 0.3 * (has(s, 'huntGear') ? 1.5 : 1); b.status = 'Охота'; break
+      case 'drill': produce('coal', eff * 1.5, 'Добыча угля'); break
+      case 'coalMine': produce('coal', eff * 2.0, 'Добыча угля в шахте'); break
+      case 'oreMine': produce('steel', eff * 0.9, 'Добыча руды'); break
+      case 'sawmill': produce('wood', eff * 0.8, 'Заготовка леса'); break
+      case 'steelworks': produce('steel', eff * 0.5, 'Плавка стали'); break
+      case 'lodge': produce('rawFood', eff * 0.3 * (has(s, 'huntGear') ? 1.5 : 1), 'Охота'); break
       case 'canteen': {
         const ratio = s.laws.includes('fillers') ? 3 : s.laws.includes('broth') ? 2.5 : 2
-        const raw = Math.min(s.resources.rawFood, eff * 1.5)
+        const raw = Math.min(s.resources.rawFood, eff * 1.5, roomFor(s, 'rations') / ratio)
         s.resources.rawFood -= raw
         s.resources.rations += raw * ratio
-        b.status = raw > 0 ? 'Готовка' : 'Нет сырой еды'
+        b.status = raw > 0 ? 'Готовка' : roomFor(s, 'rations') <= 0 ? 'Склады переполнены' : 'Нет сырой еды'
         b.active = raw > 0
         break
       }
@@ -233,10 +276,12 @@ export function runHour(s: GameState) {
     const heat = heatAt(s, p.x, p.z, cell?.ring ?? 9, 0, 'other')
     newSick += p.assigned * (WORK_SICK[heat] ?? 0) * sickMult
     const take = Math.min(p.assigned * healthFactor * 0.8, p.amount)
-    p.amount -= take
-    s.resources[p.kind] += take
+    p.amount -= addRes(s, p.kind, take)
   }
   s.stats.researchPerHour = working ? research : 0
+
+  // 4b. Society: cemetery, arena, pub
+  runSociety(s, hour, working, pop)
 
   // 5. Research
   if (s.researching && research > 0) {
@@ -353,9 +398,11 @@ export function runHour(s: GameState) {
   if (s.laws.includes('watch')) dDisc -= 0.1
   if (s.laws.includes('vigil')) dDisc -= 0.04
   if (s.hungry > 0) dDisc += 0.15
+  if (s.corpses >= 0.5) dDisc += Math.min(0.3, s.corpses * 0.008)
   s.discontent = clamp(s.discontent + dDisc, 0, 100)
 
   let dHope = 0
+  if (s.corpses >= 0.5) dHope -= Math.min(0.15, s.corpses * 0.004)
   dHope -= ((s.sick + s.gravelyIll) / p2) * 0.25
   if (warmHomes && s.stats.homeless === 0) dHope += 0.06
   if (s.stats.homeless / p2 > 0.3) dHope -= 0.05
@@ -365,6 +412,51 @@ export function runHour(s: GameState) {
   s.hope = clamp(s.hope + dHope, 0, 100)
 
   // 10. Hourly snapshot for resource trends
+  clampToStorage(s)
   s.history.push({ ...s.resources })
   if (s.history.length > 25) s.history.shift()
+}
+
+function runSociety(s: GameState, hour: number, working: boolean, pop: number) {
+  const evening = hour >= EVENING_START && hour < EVENING_END
+  let gravediggers = 0
+  for (const b of s.buildings) {
+    if (!b.built) continue
+    const f = b.assigned / (BUILDINGS[b.type].maxWorkers ?? 1)
+    if (b.type === 'cemetery') {
+      gravediggers += b.assigned
+      if (b.assigned === 0) { b.status = 'Нет могильщиков'; continue }
+      if (b.stored >= CEMETERY_CAPACITY) { b.status = 'Кладбище заполнено'; continue }
+      if (s.corpses < 0.5) { b.status = `Могил: ${Math.floor(b.stored)}/${CEMETERY_CAPACITY}`; continue }
+      if (!working) { b.status = 'Вне смены'; continue }
+      const bury = Math.min(s.corpses, b.assigned * 0.5, CEMETERY_CAPACITY - b.stored)
+      s.corpses -= bury
+      b.stored += bury
+      b.active = true
+      b.status = 'Идут похороны'
+    } else if (b.type === 'arena') {
+      if (b.assigned === 0) { b.status = 'Нет бойцов'; continue }
+      if (!evening) { b.status = 'Бои начнутся вечером'; continue }
+      b.active = true
+      b.status = 'Идут бои'
+      s.discontent = clamp(s.discontent - 0.14 * f, 0, 100)
+      const healthy = pop - s.sick - s.gravelyIll
+      if (healthy > 0 && Math.random() < 0.05 * f) {
+        s.sick += 1
+        addLog(s, 'На арене покалечили бойца.', 'warn')
+      }
+    } else if (b.type === 'pub') {
+      if (b.assigned === 0) { b.status = 'Нет персонала'; continue }
+      if (!evening) { b.status = 'Откроется вечером'; continue }
+      const use = 0.5 * f
+      if (s.resources.rawFood < use) { b.status = 'Нет сырой еды'; continue }
+      s.resources.rawFood -= use
+      b.active = true
+      b.status = 'Открыт'
+      s.discontent = clamp(s.discontent - 0.08 * f, 0, 100)
+      s.hope = clamp(s.hope + 0.04 * f, 0, 100)
+    }
+  }
+  // Without gravediggers, bodies are slowly carried out into the snow
+  if (gravediggers === 0 && s.corpses > 0) s.corpses = Math.max(0, s.corpses - Math.max(0.25, s.corpses * 0.03))
 }

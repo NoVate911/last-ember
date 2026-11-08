@@ -1,5 +1,53 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { CRATER_RADIUS } from '../grid'
+
+/** Bake a vertex colour so several materials can share one instanced mesh. */
+function painted(g: THREE.BufferGeometry, color: number): THREE.BufferGeometry {
+  const geo = g.index ? g.toNonIndexed() : g
+  geo.deleteAttribute('uv')
+  const c = new THREE.Color(color)
+  const n = (geo.attributes['position'] as THREE.BufferAttribute).count
+  const arr = new Float32Array(n * 3)
+  for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3))
+  return geo
+}
+
+/** Spruce: trunk, five needle tiers, snow resting on each tier. */
+function spruceGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [painted(new THREE.CylinderGeometry(0.12, 0.2, 1.4, 6).translate(0, 0.7, 0), 0x3a2a1e)]
+  for (let i = 0; i < 5; i++) {
+    const r = 1.35 - i * 0.24
+    const y = 0.9 + i * 0.75
+    parts.push(painted(new THREE.ConeGeometry(r, 1.3, 8).translate(0, y + 0.65, 0), i % 2 ? 0x22302a : 0x1c2a24))
+    parts.push(painted(new THREE.ConeGeometry(r * 0.75, 0.45, 8).translate(0, y + 0.95, 0), 0xf2f6fa))
+  }
+  parts.push(painted(new THREE.ConeGeometry(0.25, 0.6, 6).translate(0, 5.0, 0), 0xf2f6fa))
+  return mergeGeometries(parts)!
+}
+
+/** Bare dead tree with a few branches. */
+function deadTreeGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [painted(new THREE.CylinderGeometry(0.08, 0.18, 3.2, 6).translate(0, 1.6, 0), 0x2e2620)]
+  for (let i = 0; i < 5; i++) {
+    const b = new THREE.CylinderGeometry(0.03, 0.06, 1.0, 5)
+    b.translate(0, 0.5, 0)
+    b.rotateZ(0.7 + (i % 2) * 0.3)
+    b.rotateY(i * 1.3)
+    b.translate(0, 1.4 + i * 0.35, 0)
+    parts.push(painted(b, 0x2e2620))
+  }
+  return mergeGeometries(parts)!
+}
+
+/** Boulder with a snow cap. */
+function rockGeo(): THREE.BufferGeometry {
+  return mergeGeometries([
+    painted(new THREE.DodecahedronGeometry(1.4, 1).scale(1, 0.7, 1), 0x4d545c),
+    painted(new THREE.SphereGeometry(1.2, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.35, 1).translate(0, 0.62, 0), 0xf2f6fa),
+  ])!
+}
 
 function smoothstep(a: number, b: number, x: number) {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)))
@@ -51,20 +99,17 @@ export function createTerrain(): THREE.Mesh {
 
 export function createForest(): THREE.Group {
   const g = new THREE.Group()
-  const treeGeo = new THREE.ConeGeometry(1.2, 4.5, 6)
-  treeGeo.translate(0, 2.25, 0)
-  const snowGeo = new THREE.ConeGeometry(0.7, 1.6, 6)
-  snowGeo.translate(0, 3.9, 0)
-  const treeMat = new THREE.MeshStandardMaterial({ color: 0x24302c, roughness: 0.9 })
-  const snowMat = new THREE.MeshStandardMaterial({ color: 0xf2f6fa, roughness: 1 })
-  const count = 320
-  const trees = new THREE.InstancedMesh(treeGeo, treeMat, count)
-  const caps = new THREE.InstancedMesh(snowGeo, snowMat, count)
-  const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1.4, 0), new THREE.MeshStandardMaterial({ color: 0x4d545c, roughness: 0.9 }), 90)
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, vertexColors: true })
+  const count = 300
+  const deadCount = 40
+  const trees = new THREE.InstancedMesh(spruceGeo(), mat, count)
+  const dead = new THREE.InstancedMesh(deadTreeGeo(), mat, deadCount)
+  const rocks = new THREE.InstancedMesh(rockGeo(), mat, 90)
   const m = new THREE.Matrix4()
   const q = new THREE.Quaternion()
   const sc = new THREE.Vector3()
   const p = new THREE.Vector3()
+  const up = new THREE.Vector3(0, 1, 0)
   let seed = 7
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
   for (let i = 0; i < count; i++) {
@@ -72,13 +117,24 @@ export function createForest(): THREE.Group {
     const r = CRATER_RADIUS + 8 + rnd() * 45
     const x = Math.cos(a) * r
     const z = Math.sin(a) * r
-    const s = 0.7 + rnd() * 0.8
+    const s = 0.7 + rnd() * 0.7
     p.set(x, terrainHeight(x, z) - 0.3, z)
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 6)
-    sc.set(s, s * (0.8 + rnd() * 0.5), s)
+    q.setFromAxisAngle(up, rnd() * 6)
+    sc.set(s, s * (0.85 + rnd() * 0.4), s)
     m.compose(p, q, sc)
     trees.setMatrixAt(i, m)
-    caps.setMatrixAt(i, m)
+  }
+  for (let i = 0; i < deadCount; i++) {
+    const a = rnd() * Math.PI * 2
+    const r = CRATER_RADIUS + 3 + rnd() * 20
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r
+    const s = 0.7 + rnd() * 0.6
+    p.set(x, terrainHeight(x, z) - 0.2, z)
+    q.setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.25, rnd() * 6, (rnd() - 0.5) * 0.25))
+    sc.set(s, s, s)
+    m.compose(p, q, sc)
+    dead.setMatrixAt(i, m)
   }
   for (let i = 0; i < 90; i++) {
     const a = rnd() * Math.PI * 2
@@ -86,17 +142,17 @@ export function createForest(): THREE.Group {
     const x = Math.cos(a) * r
     const z = Math.sin(a) * r
     const s = 0.5 + rnd() * 1.6
-    p.set(x, terrainHeight(x, z), z)
-    q.setFromEuler(new THREE.Euler(rnd() * 3, rnd() * 3, rnd() * 3))
-    sc.set(s, s * 0.7, s)
+    p.set(x, terrainHeight(x, z) - 0.2, z)
+    q.setFromAxisAngle(up, rnd() * 6)
+    sc.set(s * (0.8 + rnd() * 0.4), s * (0.6 + rnd() * 0.4), s)
     m.compose(p, q, sc)
     rocks.setMatrixAt(i, m)
   }
-  trees.castShadow = true
-  caps.castShadow = true
-  rocks.castShadow = true
-  rocks.receiveShadow = true
-  g.add(trees, caps, rocks)
+  for (const mesh of [trees, dead, rocks]) {
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+  }
+  g.add(trees, dead, rocks)
   return g
 }
 

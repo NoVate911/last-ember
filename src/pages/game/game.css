@@ -1,20 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap');
 
 /*
-  Game HUD palette. The HUD always sits over the dark 3D world, so it uses a fixed
-  iron-and-brass palette that stays legible in both light and dark app themes.
+  Frostpunk-style HUD: frosted steel panels over the dark 3D world, warm amber accents.
+  The HUD always sits over the dark scene, so it uses a fixed palette that stays legible
+  in both light and dark app themes.
 */
 .hud-root {
-  --hud-bg: rgba(18, 20, 24, 0.9);
-  --hud-bg-2: rgba(32, 34, 39, 0.92);
-  --hud-brass: #b08a4a;
-  --hud-brass-dim: #6e5630;
-  --hud-text: #ece3cf;
-  --hud-muted: #a59c8a;
+  --hud-bg: rgba(9, 14, 21, 0.86);
+  --hud-bg-2: rgba(22, 31, 43, 0.9);
+  --hud-line: rgba(150, 180, 210, 0.26);
+  --hud-line-strong: rgba(200, 222, 245, 0.55);
+  --hud-text: #e6edf5;
+  --hud-muted: #8ea3b8;
   --hud-amber: #ffad4a;
   --hud-good: #7fd38f;
   --hud-bad: #ff6b55;
   --hud-cold: #8ec5ff;
+  --hud-hope: #5fb3ff;
+  --hud-disc: #e2482d;
   font-family: 'Spectral', Georgia, serif;
   color: var(--hud-text);
   user-select: none;
@@ -22,47 +25,64 @@
 
 .hud-font {
   font-family: 'Oswald', 'Arial Narrow', sans-serif;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 
 .hud-panel {
   background: linear-gradient(180deg, var(--hud-bg-2), var(--hud-bg));
-  border: 1px solid var(--hud-brass-dim);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 22px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(3px);
+  border: 1px solid var(--hud-line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 8px 24px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
 }
 
-.hud-panel-rivets {
-  position: relative;
+/* Top resource bar: a flat strip with a frosted bottom edge */
+.hud-strip {
+  background: linear-gradient(180deg, rgba(8, 12, 18, 0.95), rgba(14, 20, 29, 0.82));
+  border: 1px solid var(--hud-line);
+  border-top: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
 }
-.hud-panel-rivets::before,
-.hud-panel-rivets::after {
+
+.hud-banner {
+  background: linear-gradient(90deg, rgba(255, 173, 74, 0.0), rgba(255, 173, 74, 0.16) 30%, rgba(255, 173, 74, 0.16) 70%, rgba(255, 173, 74, 0));
+  border-top: 1px solid rgba(255, 173, 74, 0.35);
+  border-bottom: 1px solid rgba(255, 173, 74, 0.35);
+}
+
+.hud-section-title {
+  font-family: 'Oswald', 'Arial Narrow', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  color: var(--hud-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hud-section-title::before,
+.hud-section-title::after {
   content: '';
-  position: absolute;
-  top: 5px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #e0c08a, #5a4422);
+  flex: 1;
+  height: 1px;
+  background: var(--hud-line);
 }
-.hud-panel-rivets::before { left: 5px; }
-.hud-panel-rivets::after { right: 5px; }
 
 .hud-btn {
   font-family: 'Oswald', 'Arial Narrow', sans-serif;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  background: linear-gradient(180deg, #34373e, #22252a);
-  border: 1px solid var(--hud-brass-dim);
+  background: linear-gradient(180deg, rgba(40, 52, 67, 0.95), rgba(20, 27, 37, 0.95));
+  border: 1px solid var(--hud-line);
   color: var(--hud-text);
   transition: border-color 0.15s, box-shadow 0.15s, color 0.15s, background 0.15s;
 }
-.hud-btn:hover:not(:disabled) {
-  border-color: var(--hud-brass);
+.hud-btn:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--hud-line-strong);
   color: #fff;
-  box-shadow: 0 0 10px rgba(255, 173, 74, 0.25);
+  box-shadow: 0 0 10px rgba(142, 197, 255, 0.25);
 }
-.hud-btn:disabled {
+.hud-btn:disabled,
+.hud-btn[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -72,38 +92,64 @@
   color: #fff4dd;
   box-shadow: 0 0 12px rgba(255, 173, 74, 0.35);
 }
-.hud-btn:focus-visible {
+.hud-btn:focus-visible,
+.hud-round:focus-visible {
   outline: 2px solid var(--hud-amber);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+/* Big circular action buttons around the hope / discontent bars */
+.hud-round {
+  border-radius: 9999px;
+  background: radial-gradient(circle at 50% 35%, rgba(46, 60, 78, 0.98), rgba(10, 15, 22, 0.98) 70%);
+  border: 2px solid var(--hud-line-strong);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.8), 0 0 0 3px rgba(6, 9, 14, 0.85), 0 6px 18px rgba(0, 0, 0, 0.6);
+  color: var(--hud-text);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.hud-round:hover {
+  border-color: #fff;
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.8), 0 0 0 3px rgba(6, 9, 14, 0.85), 0 0 16px rgba(142, 197, 255, 0.45);
+}
+.hud-round:active { transform: scale(0.96); }
+.hud-round[data-active='true'] {
+  border-color: var(--hud-amber);
+  color: var(--hud-amber);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.8), 0 0 0 3px rgba(6, 9, 14, 0.85), 0 0 18px rgba(255, 173, 74, 0.5);
 }
 
 .hud-title {
   font-family: 'Oswald', 'Arial Narrow', sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: var(--hud-brass);
+  color: var(--hud-muted);
 }
 
+/* Central temperature gauge */
 .hud-dial {
-  background: radial-gradient(circle at 50% 40%, #2b2f36, #121418 70%);
-  border: 3px solid var(--hud-brass-dim);
-  box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.85), 0 0 0 2px #0b0c0e, 0 6px 22px rgba(0, 0, 0, 0.6);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 173, 74, 0.12), transparent 60%),
+    radial-gradient(circle at 50% 40%, #1d2733, #080c12 72%);
+  border: 3px solid rgba(200, 222, 245, 0.6);
+  box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.9), 0 0 0 3px #05080c, 0 8px 24px rgba(0, 0, 0, 0.7);
 }
 
 .hud-bar-track {
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid var(--hud-brass-dim);
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--hud-line);
 }
 
 .hud-dialog {
-  background: linear-gradient(180deg, #23262c, #15171b) !important;
+  background: linear-gradient(180deg, #1a2330, #0c1118) !important;
   color: var(--hud-text) !important;
-  border: 1px solid var(--hud-brass) !important;
+  border: 1px solid var(--hud-line-strong) !important;
   font-family: 'Spectral', Georgia, serif;
 }
-.hud-dialog [data-slot='title'],
 .hud-dialog h2 {
   color: var(--hud-amber);
+}
+.hud-dialog-locked > button:last-child {
+  display: none;
 }
 
 .hud-paper {
@@ -113,8 +159,16 @@
   box-shadow: inset 0 0 30px rgba(90, 60, 20, 0.35);
 }
 
+/* Illustration header of the selection panel */
+.hud-illustration {
+  background:
+    radial-gradient(ellipse at 50% 85%, rgba(255, 150, 60, 0.35), transparent 60%),
+    linear-gradient(180deg, #2a3a4d 0%, #121a24 70%, #0a0f15 100%);
+  border-bottom: 1px solid var(--hud-line);
+}
+
 .hud-scroll::-webkit-scrollbar { width: 8px; }
-.hud-scroll::-webkit-scrollbar-thumb { background: var(--hud-brass-dim); border-radius: 4px; }
+.hud-scroll::-webkit-scrollbar-thumb { background: rgba(150, 180, 210, 0.3); border-radius: 4px; }
 
 @keyframes hud-pulse {
   0%, 100% { opacity: 1; }

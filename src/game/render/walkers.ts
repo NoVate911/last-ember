@@ -1,62 +1,54 @@
 import * as THREE from 'three'
 import { outsideTemp, tempToLevel } from '../data'
-import { streetRadius } from '../grid'
 import { isWorkHour, totalPop } from '../simulation'
-import type { Cell, GameState } from '../types'
+import type { BuildingType, Cell, GameState, PileKind } from '../types'
+import { type Act, type Citizen, type Goal, buildPose } from './citizen'
 import { CitizenBodies, basePose, type Pose } from './citizenBody'
 import { type NetPos, type Plaza, angDiff, doorOf, netPoint, plazasFrom, route } from './streets'
+import { type Dest, furnaceSpot, rimSpot, siteSpot, workStyle } from './workplaces'
 
 /**
  * Citizen life simulation (visual only): every person has a home, possibly a job,
- * follows a daily routine along the streets, stops to chat, warms up at the generator,
- * shovels at resource heaps, hauls crates and plays (children).
+ * follows a daily routine along the streets, builds new structures, works at mines,
+ * heaps and workshops, hauls crates to storage, chats, warms up and plays (children).
  */
 
 const MAX = 120
 const ORIGIN = new THREE.Vector3(0, 0, 0)
+const BUILDERS_PER_SITE = 4
 
-type Act = 'walk' | 'inside' | 'idle' | 'warm' | 'talk' | 'shovel' | 'play'
-type Goal = 'home' | 'work' | 'errand' | 'plaza' | 'warm' | 'canteen' | 'medic' | 'visit' | 'none'
+type Haul = 'coal' | 'wood' | 'steel' | 'food'
 
-interface Dest { anchor: NetPos; final: THREE.Vector3; face: THREE.Vector3 | null }
-
-interface Resume { arriveAct: Act; arriveTime: number; arriveFace: THREE.Vector3 | null; goal: Goal }
-
-interface Citizen {
-  pos: THREE.Vector3
-  yaw: number
-  at: NetPos
-  path: THREE.Vector3[]
-  pi: number
-  act: Act
-  arriveAct: Act
-  arriveTime: number
-  arriveFace: THREE.Vector3 | null
-  goal: Goal
-  timer: number
-  face: THREE.Vector3 | null
-  partner: number
-  resume: Resume | null
-  child: boolean
-  pack: boolean
-  scale: number
-  lane: number
-  carry: boolean
-  phase: number
-  seed: number
-  active: boolean
-  workCycles: number
-  chatCooldown: number
-  adultIndex: number
-}
+interface Job { cell: Cell; pile: boolean; type: BuildingType | null; kind: PileKind | null }
 
 interface Ctx {
   key: string
   homes: Cell[]
-  jobs: { cell: Cell; pile: boolean }[]
+  jobs: Job[]
+  sites: Cell[]
+  siteIds: Set<string>
   canteens: Cell[]
   medics: Cell[]
   others: Cell[]
+  coalStores: Cell[]
+  stores: Cell[]
+  depots: Cell[]
+  heaps: { cell: Cell; kind: PileKind }[]
+}
+
+const EMPTY_CTX: Ctx = {
+  key: '', homes: [], jobs: [], sites: [], siteIds: new Set(), canteens: [], medics: [], others: [],
+  coalStores: [], stores: [], depots: [], heaps: [],
+}
+
+function haulOf(type: BuildingType | null): Haul | null {
+  switch (type) {
+    case 'drill': case 'coalMine': return 'coal'
+    case 'oreMine': case 'steelworks': return 'steel'
+    case 'sawmill': return 'wood'
+    case 'lodge': return 'food'
+    default: return null
+  }
 }
 
 export class Walkers {
@@ -64,7 +56,7 @@ export class Walkers {
   mesh: THREE.Group
   private people: Citizen[] = []
   private plazas: Plaza[] = []
-  private ctx: Ctx = { key: '', homes: [], jobs: [], canteens: [], medics: [], others: [] }
+  private ctx: Ctx = EMPTY_CTX
   private clock = 0
   private pairTimer = 0
   private pose: Pose = basePose()
@@ -83,44 +75,48 @@ export class Walkers {
         face: null, partner: -1, resume: null, child,
         pack: !child && rnd() < 0.3, scale: child ? 0.66 + rnd() * 0.06 : 0.94 + rnd() * 0.14,
         lane: (rnd() - 0.5) * 0.4, carry: false, phase: rnd() * 6, seed: rnd(), active: false,
-        workCycles: 0, chatCooldown: rnd() * 10, adultIndex: child ? -1 : adult++,
+        workCycles: 0, chatCooldown: rnd() * 10, adultIndex: child ? -1 : adult++, slot: i, target: '',
       })
     }
   }
 
   // ---------- Context ----------
   private refreshCtx(s: GameState) {
-    const key = `${Math.floor(s.time)}|${s.buildings.length}|${s.piles.length}|${s.laws.length}`
+    let assigned = 0
+    let built = 0
+    for (const b of s.buildings) { assigned += b.assigned; if (b.built) built++ }
+    for (const p of s.piles) assigned += p.assigned
+    const key = `${Math.floor(s.time)}|${s.buildings.length}|${built}|${s.piles.length}|${s.laws.length}|${assigned}`
     if (key === this.ctx.key) return
-    const cellOf = (id: string) => s.cells.get(id)
-    const homes: Cell[] = []
-    const jobs: Ctx['jobs'] = []
-    const canteens: Cell[] = []
-    const medics: Cell[] = []
-    const others: Cell[] = []
+    const ctx: Ctx = { ...EMPTY_CTX, key, siteIds: new Set(), homes: [], jobs: [], sites: [], canteens: [], medics: [], others: [], coalStores: [], stores: [], depots: [], heaps: [] }
+    const jobs: Job[] = []
     for (const b of s.buildings) {
-      const c = cellOf(b.cellId)
-      if (!c || !b.built) continue
-      if (b.type === 'tent' || b.type === 'bunkhouse' || b.type === 'house') { homes.push(c); continue }
-      others.push(c)
-      if (b.type === 'canteen') canteens.push(c)
-      if ((b.type === 'aid' || b.type === 'hospital') && b.assigned > 0) medics.push(c)
-      for (let n = 0; n < b.assigned; n++) jobs.push({ cell: c, pile: false })
+      const c = s.cells.get(b.cellId)
+      if (!c) continue
+      if (!b.built) { ctx.sites.push(c); ctx.siteIds.add(c.id); continue }
+      if (b.type === 'tent' || b.type === 'bunkhouse' || b.type === 'house') { ctx.homes.push(c); continue }
+      ctx.others.push(c)
+      if (b.type === 'canteen') ctx.canteens.push(c)
+      if (b.type === 'coalStorage') ctx.coalStores.push(c)
+      if (b.type === 'warehouse') ctx.stores.push(c)
+      if (b.type === 'depot') ctx.depots.push(c)
+      if ((b.type === 'aid' || b.type === 'hospital') && b.assigned > 0) ctx.medics.push(c)
+      for (let n = 0; n < b.assigned; n++) jobs.push({ cell: c, pile: false, type: b.type, kind: null })
     }
     for (const p of s.piles) {
-      const c = cellOf(p.cellId)
+      const c = s.cells.get(p.cellId)
       if (!c) continue
-      for (let n = 0; n < p.assigned; n++) jobs.push({ cell: c, pile: true })
+      ctx.heaps.push({ cell: c, kind: p.kind })
+      for (let n = 0; n < p.assigned; n++) jobs.push({ cell: c, pile: true, type: null, kind: p.kind })
     }
     // Interleave jobs so visible people spread over all workplaces
     jobs.sort((a, b) => a.cell.id.localeCompare(b.cell.id))
-    const spread: Ctx['jobs'] = []
-    const groups = new Map<string, Ctx['jobs']>()
+    const groups = new Map<string, Job[]>()
     for (const j of jobs) groups.set(j.cell.id, [...(groups.get(j.cell.id) ?? []), j])
-    while (spread.length < jobs.length) {
-      for (const g of groups.values()) { const j = g.shift(); if (j) spread.push(j) }
+    while (ctx.jobs.length < jobs.length) {
+      for (const g of groups.values()) { const j = g.shift(); if (j) ctx.jobs.push(j) }
     }
-    this.ctx = { key, homes, jobs: spread, canteens, medics, others }
+    this.ctx = ctx
   }
 
   // ---------- Destinations ----------
@@ -142,6 +138,16 @@ export class Walkers {
     }
   }
 
+  /** Where hauled goods go: coal to coal storage or the furnace, food to the canteen, the rest to warehouses. */
+  private storeSpot(what: Haul): Dest {
+    const ctx = this.ctx
+    const list = what === 'coal' ? ctx.coalStores
+      : what === 'food' ? (ctx.canteens.length ? ctx.canteens : ctx.stores)
+      : ctx.stores.length ? ctx.stores : ctx.depots
+    const c = list[Math.floor(Math.random() * list.length)]
+    return c ? doorOf(c) : furnaceSpot()
+  }
+
   private goTo(w: Citizen, d: Dest, goal: Goal, act: Act, time: number) {
     w.path = [netPoint(w.at, w.lane), ...route(w.at, d.anchor, w.lane), d.final]
     w.pi = 0
@@ -157,6 +163,85 @@ export class Walkers {
   private stay(w: Citizen, act: Act, time: number) {
     w.act = act
     w.timer = time
+  }
+
+  // ---------- Work routines ----------
+  private build(w: Citizen, site: Cell, slot: number) {
+    const rand = Math.random()
+    if (w.goal === 'fetch' && w.target === site.id) {
+      // Back from the stores with materials
+      w.carry = true
+      this.goTo(w, siteSpot(site, w.slot), 'build', 'hammer', 8 + rand * 6)
+      return
+    }
+    if (w.goal === 'build' && w.target === site.id) {
+      if (rand < 0.25) this.goTo(w, this.storeSpot(rand < 0.12 ? 'steel' : 'wood'), 'fetch', 'idle', 1.5)
+      else this.stay(w, 'hammer', 7 + rand * 6)
+      return
+    }
+    w.target = site.id
+    w.slot = slot
+    this.goTo(w, siteSpot(site, slot), 'build', 'hammer', 8 + rand * 6)
+  }
+
+  private work(w: Citizen, i: number, job: Job) {
+    const rand = Math.random()
+    const cell = job.cell
+    const style = job.pile ? 'heap' : workStyle(job.type ?? 'tent')
+    const here = w.goal === 'work' && w.target === cell.id
+
+    if (!here) {
+      w.target = cell.id
+      w.slot = i
+      w.workCycles = 0
+      if (style === 'heap' || style === 'dig') this.goTo(w, siteSpot(cell, i), 'work', 'shovel', 9 + rand * 6)
+      else if (style === 'craft') this.goTo(w, siteSpot(cell, i), 'work', 'hammer', 9 + rand * 6)
+      else if (style === 'inside') this.goTo(w, doorOf(cell), 'work', 'inside', 10 + rand * 6)
+      else this.goTo(w, doorOf(cell), 'work', 'idle', 1.5)
+      return
+    }
+
+    w.workCycles++
+    const haul = job.pile ? job.kind : haulOf(job.type)
+    switch (style) {
+      case 'heap':
+      case 'dig':
+      case 'craft':
+        if (haul && w.workCycles % 3 === 0) {
+          w.carry = true
+          this.goTo(w, this.storeSpot(haul), 'errand', 'idle', 1.5)
+        } else this.stay(w, style === 'craft' ? 'hammer' : 'shovel', 8 + rand * 6)
+        break
+      case 'haul': {
+        // Depot porters: dig at the nearest heap, then carry the crate back
+        if (w.workCycles % 2 === 1) {
+          const heaps = this.ctx.heaps
+            .filter((h) => Math.hypot(h.cell.x - cell.x, h.cell.z - cell.z) <= 15)
+            .sort((a, b) => Math.hypot(a.cell.x - cell.x, a.cell.z - cell.z) - Math.hypot(b.cell.x - cell.x, b.cell.z - cell.z))
+          const heap = heaps[0]
+          if (heap) this.goTo(w, siteSpot(heap.cell, i + 3), 'work', 'shovel', 4 + rand * 3)
+          else this.stay(w, 'idle', 4)
+        } else {
+          w.carry = true
+          this.goTo(w, doorOf(cell), 'work', 'idle', 1.5)
+        }
+        break
+      }
+      case 'hunt':
+        // Hunters disappear beyond the rim and come back loaded with game
+        if (w.workCycles % 2 === 1) this.goTo(w, rimSpot(cell), 'work', 'inside', 10 + rand * 8)
+        else {
+          w.carry = true
+          this.goTo(w, doorOf(cell), 'work', 'idle', 1.5)
+        }
+        break
+      default:
+        if (rand < 0.3 && this.ctx.others.length > 1) {
+          const target = this.ctx.others[Math.floor(Math.random() * this.ctx.others.length)]!
+          w.carry = true
+          this.goTo(w, doorOf(target), 'errand', 'idle', 2)
+        } else this.stay(w, 'inside', 8 + rand * 8)
+    }
   }
 
   private decide(w: Citizen, i: number, s: GameState, hour: number) {
@@ -185,25 +270,18 @@ export class Walkers {
     const job = jobIdx >= 0 ? ctx.jobs[jobIdx] : undefined
     const working = isWorkHour(s, hour)
 
-    if (working && job) {
-      if (w.goal === 'work') {
-        w.workCycles++
-        if (job.pile) {
-          if (w.workCycles % 3 === 0) {
-            w.carry = true
-            this.goTo(w, this.warmSpot(), 'errand', 'idle', 1.5)
-          } else this.stay(w, 'shovel', 8 + rand * 6)
-        } else if (rand < 0.35 && ctx.others.length > 1) {
-          const target = ctx.others[Math.floor(Math.random() * ctx.others.length)]!
-          w.carry = true
-          this.goTo(w, doorOf(target), 'errand', 'idle', 2)
-        } else this.stay(w, 'inside', 8 + rand * 8)
+    if (working && job) { this.work(w, i, job); return }
+
+    // Adults without a job become builders on construction sites
+    if (working && !w.child && ctx.sites.length) {
+      const bi = w.adultIndex - ctx.jobs.length
+      if (bi >= 0 && bi < ctx.sites.length * BUILDERS_PER_SITE) {
+        const site = ctx.sites[bi % ctx.sites.length]!
+        this.build(w, site, Math.floor(bi / ctx.sites.length))
         return
       }
-      const d = doorOf(job.cell)
-      this.goTo(w, d, 'work', job.pile ? 'shovel' : 'inside', job.pile ? 10 : 12)
-      return
     }
+    w.target = ''
 
     if (!working && hour >= 17) {
       // Evening routine: queue for food, gather with friends, warm up
@@ -250,14 +328,15 @@ export class Walkers {
   }
 
   private findChats(count: number) {
+    const free = (w: Citizen) =>
+      w.active && w.partner < 0 && w.chatCooldown <= 0 && !w.carry &&
+      (w.act === 'walk' || w.act === 'idle' || w.act === 'warm') && w.goal !== 'work' && w.goal !== 'build'
     for (let i = 0; i < count; i++) {
       const a = this.people[i]!
-      if (!a.active || a.partner >= 0 || a.chatCooldown > 0 || a.carry) continue
-      if (a.act !== 'walk' && a.act !== 'idle' && a.act !== 'warm') continue
+      if (!free(a)) continue
       for (let j = i + 1; j < count; j++) {
         const b = this.people[j]!
-        if (!b.active || b.partner >= 0 || b.chatCooldown > 0 || b.carry) continue
-        if (b.act !== 'walk' && b.act !== 'idle' && b.act !== 'warm') continue
+        if (!free(b)) continue
         if (a.pos.distanceToSquared(b.pos) > 1.6 * 1.6) continue
         if (Math.random() < (a.act === 'walk' ? 0.25 : 0.12)) {
           this.startChat(a, i, b, j)
@@ -305,9 +384,12 @@ export class Walkers {
       w.chatCooldown -= simDt
       const sick = w.seed < sickRatio
 
+      // A finished construction site releases its builders right away
+      if (w.goal === 'build' && w.act === 'hammer' && !this.ctx.siteIds.has(w.target)) w.timer = 0
+
       // State machine
       if (w.act === 'walk') {
-        let step = simDt * 1.25 * (w.child ? 1.1 : 1) * (sick ? 0.55 : 1)
+        let step = simDt * 1.25 * (w.child ? 1.1 : 1) * (sick ? 0.55 : 1) * (w.carry ? 0.85 : 1)
         while (step > 0 && w.pi < w.path.length) {
           const target = w.path[w.pi]!
           const d = Math.hypot(target.x - w.pos.x, target.z - w.pos.z)
@@ -318,7 +400,8 @@ export class Walkers {
           w.act = w.arriveAct
           w.timer = w.arriveTime
           w.face = w.arriveFace
-          if (w.goal === 'work') w.workCycles = 0
+          w.carry = false
+          // Leaving the street: anchor stays on the network so the next route starts correctly
         }
       } else {
         w.timer -= simDt
@@ -352,98 +435,9 @@ export class Walkers {
       }
       if (w.act !== 'play') w.yaw += angDiff(w.yaw, targetYaw) * Math.min(1, dt * 8)
 
-      this.buildPose(p, w, i, t, simDt, sick, cold)
+      buildPose(p, w, i, t, simDt, sick, cold)
       this.bodies.apply(i, p)
     }
     this.bodies.finish(MAX)
-  }
-
-  private buildPose(p: Pose, w: Citizen, i: number, t: number, simDt: number, sick: boolean, cold: boolean) {
-    Object.assign(p, basePose())
-    p.x = w.pos.x
-    p.z = w.pos.z
-    p.yaw = w.yaw
-    p.scale = w.scale
-    p.pack = w.pack
-    const off = w.seed * 50
-
-    switch (w.act) {
-      case 'inside':
-        p.hidden = true
-        return
-      case 'walk': {
-        w.phase += simDt * (w.child ? 11 : 8.5) * (sick ? 0.6 : 1)
-        const sw = Math.sin(w.phase)
-        p.legL = sw * 0.55
-        p.legR = -sw * 0.55
-        p.bob = Math.abs(Math.cos(w.phase)) * 0.035 * w.scale
-        p.lean = sick ? 0.32 : w.child ? 0.05 : 0.12
-        if (w.carry) {
-          p.armLX = p.armRX = -0.95
-          p.armLZ = p.armRZ = -0.05
-          p.crate = true
-        } else {
-          p.armLX = -sw * (sick ? 0.15 : 0.45)
-          p.armRX = sw * (sick ? 0.15 : 0.45)
-        }
-        break
-      }
-      case 'idle':
-        p.lean = 0.03
-        p.nod = Math.sin(t * 0.5 + off) * 0.05
-        p.yaw += Math.sin(t * 0.3 + off) * 0.15
-        break
-      case 'warm':
-        p.lean = 0.08
-        p.armLX = p.armRX = -1.25 + Math.sin(t * 7 + off) * 0.06
-        p.armLZ = p.armRZ = -0.28
-        p.nod = 0.1
-        break
-      case 'talk': {
-        const partner = w.partner >= 0 ? this.people[w.partner] : undefined
-        // In pairs people take turns; in groups several may speak at once
-        const turn = partner ? Math.sin(t * 0.9 + Math.min(i, w.partner)) * (i < w.partner ? 1 : -1) > 0 : Math.sin(t * 0.7 + off) > 0.35
-        if (turn) {
-          p.armRX = -0.6 + Math.sin(t * 5 + off) * 0.35
-          p.armRZ = 0.35 + Math.sin(t * 3 + off) * 0.12
-          p.armLX = -0.25 + Math.sin(t * 4 + off + 1) * 0.15
-          p.nod = Math.sin(t * 6 + off) * 0.07
-        } else {
-          p.nod = Math.sin(t * 1.7 + off) > 0.9 ? 0.2 : 0.02
-          p.armLZ = p.armRZ = 0.06
-        }
-        p.lean = 0.04
-        break
-      }
-      case 'shovel': {
-        const c = Math.sin(t * 3 + off)
-        p.lean = 0.3 + (c + 1) * 0.18
-        p.armLX = p.armRX = -0.5 - (c + 1) * 0.35
-        p.armLZ = p.armRZ = -0.1
-        p.legL = 0.18
-        p.legR = -0.12
-        p.tool = true
-        break
-      }
-      case 'play': {
-        const hop = Math.abs(Math.sin(t * 6 + off))
-        p.bob = hop * 0.16 * w.scale
-        w.yaw += simDt * 1.8
-        p.yaw = w.yaw
-        p.armRX = -2.6 + Math.sin(t * 8 + off) * 0.3
-        p.armLX = -0.4 + Math.sin(t * 6 + off) * 0.3
-        p.legL = Math.sin(t * 12 + off) * 0.3
-        p.legR = -p.legL
-        break
-      }
-    }
-    // Shiver in the cold when standing still
-    if (cold && (w.act === 'idle' || w.act === 'talk')) p.yaw += Math.sin(t * 45 + off) * 0.03
-    if (w.goal === 'warm' && w.act === 'warm') {
-      // keep a respectful distance from the furnace
-      const r = Math.hypot(p.x, p.z)
-      const min = streetRadius(0) - 0.05
-      if (r < min && r > 0) { p.x *= min / r; p.z *= min / r }
-    }
   }
 }

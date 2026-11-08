@@ -12,11 +12,18 @@ export type BuildingType =
   | 'drill'
   | 'sawmill'
   | 'steelworks'
+  | 'coalMine'
+  | 'oreMine'
+  | 'warehouse'
+  | 'coalStorage'
+  | 'cemetery'
+  | 'arena'
+  | 'pub'
 
 export type ResourceKey = 'coal' | 'wood' | 'steel' | 'rawFood' | 'rations'
 export type PileKind = 'coal' | 'wood' | 'steel'
 export type WorkerKind = 'workers' | 'engineers'
-export type BuildCategory = 'housing' | 'resources' | 'food' | 'health' | 'heat' | 'tech'
+export type BuildCategory = 'housing' | 'resources' | 'storage' | 'food' | 'health' | 'heat' | 'social' | 'tech'
 
 export interface BuildingDef {
   type: BuildingType
@@ -33,6 +40,12 @@ export interface BuildingDef {
   maxWorkers?: number
   /** research id required to build */
   requires?: string
+  /** law id required to build */
+  requiresLaw?: string
+  /** Must be placed on a resource deposit of this kind (mines) */
+  onDeposit?: PileKind
+  /** Extra storage capacity provided once built */
+  storage?: Partial<Record<ResourceKey, number>>
 }
 
 export interface Cell {
@@ -50,6 +63,8 @@ export interface Cell {
   occupant: { kind: 'building' | 'pile'; id: number } | null
   /** Street / plaza cell on a radial avenue: kept free so people can walk through */
   road: boolean
+  /** Underground resource deposit (left behind by heaps); mines can be built on it */
+  deposit: PileKind | null
 }
 
 export interface Building {
@@ -72,6 +87,8 @@ export interface Building {
   residents: number
   /** Heat level (0-5) computed by the last simulation tick */
   heat: number
+  /** Graves filled (cemetery only) */
+  stored: number
 }
 
 export interface Pile {
@@ -137,7 +154,8 @@ export interface UiState {
   selected: Selection
   heatOverlay: boolean
   hoverCellId: string | null
-  dialog: 'laws' | 'research' | null
+  dialog: 'laws' | 'research' | 'menu' | null
+  buildOpen: boolean
 }
 
 export interface GameState {
@@ -151,6 +169,8 @@ export interface GameState {
   hungry: number
   hungerStreak: number
   deaths: number
+  /** Bodies waiting to be buried */
+  corpses: number
   amputees: number
   hope: number
   discontent: number
@@ -165,6 +185,7 @@ export interface GameState {
   lastLawAt: number
   shiftMode: 'normal' | 'extended'
   firedEvents: string[]
+  objectivesDone: string[]
   pendingEvent: PendingEvent | null
   promise: ActivePromise | null
   log: LogEntry[]
@@ -182,5 +203,6 @@ export interface GameState {
     freeWorkers: number
     freeEngineers: number
     treated: number
+    caps: Record<ResourceKey, number>
   }
 }

@@ -1,9 +1,11 @@
-import type { BuildingDef, BuildingType, BuildCategory, PileKind } from './types'
+import type { BuildingDef, BuildingType, BuildCategory, PileKind, ResourceKey } from './types'
 
 export const GAME_TITLE = 'ПОСЛЕДНИЙ ЖАР'
 export const GAME_SUBTITLE = 'Город на краю света'
 
 export const START_HOUR = 8
+/** Real seconds per in-game hour at normal (x1) speed: a full day takes about 3 minutes */
+export const SECONDS_PER_HOUR = 8
 export const FINAL_DAY = 21 // the city wins when day 21 dawns
 export const STORM_START_DAY = 18
 export const LAW_COOLDOWN_HOURS = 18
@@ -25,6 +27,20 @@ export const HEAT_LEVELS = [
 export const PILE_NAMES: Record<PileKind, string> = { coal: 'уголь', wood: 'дерево', steel: 'сталь' }
 /** Title shown for a resource heap */
 export const PILE_TITLES: Record<PileKind, string> = { coal: 'Куча угля', wood: 'Обломки древесины', steel: 'Груда металлолома' }
+/** Title shown for an exhausted heap's deposit */
+export const DEPOSIT_TITLES: Record<PileKind, string> = { coal: 'Угольное месторождение', wood: 'Залежи древесины', steel: 'Рудное месторождение' }
+
+export const RESOURCE_NAMES: Record<ResourceKey, string> = {
+  coal: 'Уголь', wood: 'Дерево', steel: 'Сталь', rawFood: 'Сырая еда', rations: 'Пайки',
+}
+
+/** Storage capacity before any warehouses are built */
+export const BASE_STORAGE: Record<ResourceKey, number> = { coal: 500, wood: 300, steel: 150, rawFood: 150, rations: 300 }
+
+/** Graves per cemetery */
+export const CEMETERY_CAPACITY = 40
+export const EVENING_START = 18
+export const EVENING_END = 23
 
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   tent: {
@@ -92,14 +108,51 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     description: 'Инженеры разрабатывают новые технологии. 5 инженеров.',
     cost: { wood: 30 }, insulation: 1, workerKind: 'engineers', maxWorkers: 5,
   },
+  coalMine: {
+    type: 'coalMine', name: 'Угольная шахта', category: 'resources', buildHours: 10,
+    description: 'Строится только на угольном месторождении — на месте кучи угля. Неиссякаемый источник угля. 15 рабочих.',
+    cost: { wood: 40, steel: 20 }, insulation: 1, workerKind: 'workers', maxWorkers: 15, requires: 'coalMine', onDeposit: 'coal',
+  },
+  oreMine: {
+    type: 'oreMine', name: 'Рудная шахта', category: 'resources', buildHours: 10,
+    description: 'Строится только на рудном месторождении — на месте груды металлолома. Добывает сталь. 10 рабочих.',
+    cost: { wood: 40, steel: 10 }, insulation: 1, workerKind: 'workers', maxWorkers: 10, requires: 'oreMine', onDeposit: 'steel',
+  },
+  warehouse: {
+    type: 'warehouse', name: 'Склад ресурсов', category: 'storage', buildHours: 3,
+    description: 'Вместимость: дерево +250, сталь +150, сырая еда +150, пайки +250.',
+    cost: { wood: 25 }, insulation: 0, storage: { wood: 250, steel: 150, rawFood: 150, rations: 250 },
+  },
+  coalStorage: {
+    type: 'coalStorage', name: 'Угольный склад', category: 'storage', buildHours: 3,
+    description: 'Вместимость угля +600. Без складов лишний уголь пропадает.',
+    cost: { wood: 25, steel: 5 }, insulation: 0, storage: { coal: 600 },
+  },
+  cemetery: {
+    type: 'cemetery', name: 'Кладбище', category: 'social', buildHours: 3,
+    description: `Могильщики хоронят погибших (до ${40} могил). Непогребённые тела злят людей. 5 рабочих.`,
+    cost: { wood: 15 }, insulation: 0, workerKind: 'workers', maxWorkers: 5, requiresLaw: 'burial',
+  },
+  arena: {
+    type: 'arena', name: 'Бойцовская арена', category: 'social', buildHours: 4,
+    description: 'Вечерние бои снижают недовольство, но бойцы иногда получают травмы. 5 рабочих.',
+    cost: { wood: 35 }, insulation: 0, workerKind: 'workers', maxWorkers: 5, requiresLaw: 'arena',
+  },
+  pub: {
+    type: 'pub', name: 'Паб', category: 'social', buildHours: 4,
+    description: 'Самогон и тёплый очаг. Вечером снижает недовольство и поднимает надежду, тратит сырую еду. 5 рабочих.',
+    cost: { wood: 30, steel: 5 }, insulation: 1, workerKind: 'workers', maxWorkers: 5, requiresLaw: 'pub',
+  },
 }
 
 export const CATEGORIES: { id: BuildCategory; label: string }[] = [
   { id: 'housing', label: 'Жильё' },
   { id: 'resources', label: 'Ресурсы' },
+  { id: 'storage', label: 'Склады' },
   { id: 'food', label: 'Еда' },
   { id: 'health', label: 'Здоровье' },
   { id: 'heat', label: 'Тепло' },
+  { id: 'social', label: 'Общество' },
   { id: 'tech', label: 'Технологии' },
 ]
 
@@ -127,7 +180,9 @@ export const RESEARCH: ResearchDef[] = [
   { id: 'hospital', name: 'Больница', tier: 3, points: 80, cost: { wood: 25, steel: 15 }, requires: 'heaters', description: 'Открывает больницу, где вылечивают тяжелобольных.' },
   { id: 'genPower', name: 'Усиленный котёл', tier: 3, points: 100, cost: { wood: 40, steel: 25 }, requires: 'genRange', description: 'Открывает 3-й и 4-й уровни мощности генератора.' },
   { id: 'insulation', name: 'Утепление стен', tier: 3, points: 90, cost: { wood: 30, steel: 15 }, requires: 'house', description: 'Все жилые дома получают +1 к теплу.' },
+  { id: 'coalMine', name: 'Угольная шахта', tier: 3, points: 75, cost: { wood: 25, steel: 10 }, requires: 'drill', description: 'Открывает угольную шахту на месте куч угля.' },
   { id: 'genRange2', name: 'Дальние трубы', tier: 4, points: 120, cost: { wood: 40, steel: 30 }, requires: 'genPower', description: 'Радиус тепла генератора ещё +2 кольца.' },
+  { id: 'oreMine', name: 'Рудная шахта', tier: 4, points: 85, cost: { wood: 30, steel: 10 }, requires: 'steelworks', description: 'Открывает рудную шахту на месте груд металлолома.' },
 ]
 
 export interface LawDef {
@@ -148,7 +203,9 @@ export const LAWS: LawDef[] = [
   { id: 'amputation', group: 'adaptation', name: 'Экстренная ампутация', excludes: ['lifeSupport'], description: 'Медпункты могут лечить тяжелобольных. Каждое такое лечение немного снижает надежду.' },
   { id: 'lifeSupport', group: 'adaptation', name: 'Поддержание жизни', excludes: ['amputation'], description: 'Тяжелобольные, ожидающие лечения, умирают вдвое реже.' },
   { id: 'overflow', group: 'adaptation', name: 'Дополнительные койки', description: 'Медицинские здания принимают на 50% больше пациентов, но лечат медленнее.' },
-  { id: 'burial', group: 'adaptation', name: 'Кладбище', description: 'Смерти снижают надежду вдвое меньше.' },
+  { id: 'burial', group: 'adaptation', name: 'Кладбище', description: 'Открывает кладбище, где хоронят погибших. Смерти снижают надежду вдвое меньше.' },
+  { id: 'arena', group: 'adaptation', name: 'Бойцовская арена', description: 'Открывает арену: вечерние бои снижают недовольство, но иногда бойцы травмируются.' },
+  { id: 'pub', group: 'adaptation', name: 'Паб', description: 'Открывает паб: по вечерам снижает недовольство и поднимает надежду, тратит сырую еду.' },
   { id: 'pathOrder', group: 'purpose', name: 'Путь дисциплины', excludes: ['pathFaith'], description: 'Единство через порядок. Недовольство сразу −10.' },
   { id: 'watch', group: 'purpose', name: 'Ночной дозор', requires: 'pathOrder', description: 'Патрули поддерживают порядок. Недовольство постепенно снижается.' },
   { id: 'broadcast', group: 'purpose', name: 'Городское вещание', requires: 'pathOrder', description: 'Громкоговорители сообщают о каждом успехе. Надежда постепенно растёт.' },
