@@ -18,7 +18,7 @@ export function LawsDialog() {
           <DialogTitle className="hud-font flex items-center gap-2 text-2xl uppercase tracking-widest text-[#ffad4a]">
             <ScrollText className="h-6 w-6" /> Книга законов
           </DialogTitle>
-          <DialogDescription className="text-[#a59c8a]">
+          <DialogDescription className="text-[#8ea3b8]">
             {cooldown > 0 ? `Совет соберётся снова через ${Math.ceil(cooldown)} ч.` : 'Совет ждёт вашего указа. За раз можно подписать один закон.'}
           </DialogDescription>
         </DialogHeader>
@@ -70,7 +70,7 @@ export function ResearchDialog() {
           <DialogTitle className="hud-font flex items-center gap-2 text-2xl uppercase tracking-widest text-[#8ec5ff]">
             <FlaskConical className="h-6 w-6" /> Технологии
           </DialogTitle>
-          <DialogDescription className="text-[#a59c8a]">
+          <DialogDescription className="text-[#8ea3b8]">
             {workshops === 0
               ? 'Постройте мастерскую и назначьте туда инженеров, чтобы исследовать технологии.'
               : `Мастерских: ${workshops} · ${s.stats.researchPerHour.toFixed(1)} очков/ч во время смены.`}
@@ -87,16 +87,16 @@ export function ResearchDialog() {
                   return (
                     <div
                       key={r.id}
-                      className={`rounded border p-2 ${st === 'done' ? 'border-[#7fd38f]/60 bg-[#7fd38f]/10' : st === 'active' ? 'border-[#8ec5ff] bg-[#8ec5ff]/10' : 'border-[#6e5630] bg-black/30'} ${st === 'locked' ? 'opacity-50' : ''}`}
+                      className={`rounded border p-2 ${st === 'done' ? 'border-[#7fd38f]/60 bg-[#7fd38f]/10' : st === 'active' ? 'border-[#8ec5ff] bg-[#8ec5ff]/10' : 'border-white/15 bg-black/30'} ${st === 'locked' ? 'opacity-50' : ''}`}
                     >
                       <div className="hud-font text-sm">{r.name}</div>
-                      <div className="mt-0.5 text-[11px] leading-snug text-[#cfc6b3]">{r.description}</div>
-                      <div className="mt-1 text-[11px] text-[#a59c8a]">
+                      <div className="mt-0.5 text-[11px] leading-snug text-[#cdd8e4]">{r.description}</div>
+                      <div className="mt-1 text-[11px] text-[#8ea3b8]">
                         {r.points} очк. · дерево {r.cost.wood ?? 0}{r.cost.steel ? ` · сталь ${r.cost.steel}` : ''}
                         {r.requires && st === 'locked' && ` · нужно: ${RESEARCH.find((x) => x.id === r.requires)?.name}`}
                       </div>
                       <div className="hud-bar-track mt-1.5 h-1.5 overflow-hidden rounded-sm">
-                        <div className="h-full bg-[#8ec5ff]" style={{ width: `${pct}%` }} />
+                        <div className="h-full bg-[#8ec5ff]" style=undefined />
                       </div>
                       {st === 'available' && (
                         <button type="button" disabled={!!s.researching} className="hud-btn mt-1.5 w-full rounded py-1 text-xs" onClick={() => game.startResearch(r.id)}>
