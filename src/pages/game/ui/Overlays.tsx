@@ -44,7 +44,7 @@ export function LogPanel() {
   return (
     <div className="flex flex-col gap-1">
       {entries.map((e, i) => (
-        <div key={e.id} className="hud-panel rounded px-2 py-1 text-xs" style=undefined>
+        <div key={e.id} className="hud-panel rounded px-2 py-1 text-xs" style={{ opacity: 1 - i * 0.15 }}>
           <span className="hud-font mr-1 text-[10px] text-[#8ea3b8]">{formatTime(e.time).clock}</span>
           <span className={tone[e.tone]}>{e.text}</span>
         </div>
