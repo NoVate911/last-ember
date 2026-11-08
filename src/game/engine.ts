@@ -1,5 +1,6 @@
 import { BASE_STORAGE, BUILDINGS, FINAL_DAY, LAWS, LAW_COOLDOWN_HOURS, PILE_NAMES, RESEARCH, SECONDS_PER_HOUR, START_HOUR } from './data'
 import { checkEnd, checkEvents, checkPromise, resolveEvent } from './events'
+import { resolveExpedition, startExpedition } from './expedition'
 import { buildCells, mulberry32 } from './grid'
 import { checkObjectives } from './objectives'
 import { type SaveSlot, saveGame } from './save'
@@ -64,7 +65,15 @@ function createInitialState(): GameState {
     lastLawAt: -999,
     shiftMode: 'normal',
     firedEvents: [],
+    lastEventAt: START_HOUR,
+    eventLog: {},
     objectivesDone: [],
+    expedition: null,
+    explored: [],
+    studyProgress: 0,
+    presence: {},
+    buildPresence: {},
+    studyPresence: {},
     pendingEvent: null,
     promise: null,
     log: [],
@@ -160,6 +169,7 @@ export class Game {
   private tickHour() {
     const s = this.state
     runHour(s)
+    resolveExpedition(s)
     // Remove exhausted heaps and free their cells
     for (const p of [...s.piles]) {
       if (p.amount > 0.01) continue
@@ -240,6 +250,7 @@ export class Game {
       if (cell.occupant?.kind === 'building') return { ok: false, reason: 'Занято' }
     } else if (cell.occupant) return { ok: false, reason: 'Занято' }
     if (!this.isUnlocked(type)) return { ok: false, reason: this.lockReason(type) ?? 'Закрыто' }
+    if (def.unique && this.state.buildings.some((b) => b.type === type)) return { ok: false, reason: 'Можно построить только одно' }
     if (!this.canAfford(type)) return { ok: false, reason: 'Не хватает материалов' }
     return { ok: true, reason: '' }
   }
@@ -267,7 +278,7 @@ export class Game {
     const id = s.nextId++
     const b: Building = {
       id, type, cellId, x: cell.x, z: cell.z, angle: cell.angle, progress: 0, built: false,
-      assigned: 0, enabled: true, status: 'Строится', heat: 0, active: false, residents: 0, stored: 0,
+      assigned: 0, enabled: true, status: 'Строится', heat: 0, active: false, residents: 0, stored: 0, present: 0,
     }
     b.heat = buildingHeat(s, b)
     s.buildings.push(b)
@@ -282,6 +293,11 @@ export class Game {
     const idx = s.buildings.findIndex((b) => b.id === id)
     const b = s.buildings[idx]
     if (!b) return
+    if (b.type === 'beacon' && s.expedition) {
+      addLog(s, 'Нельзя разобрать маяк, пока разведчики в пути.', 'warn')
+      this.emit(true)
+      return
+    }
     const def = BUILDINGS[b.type]
     s.resources.wood += Math.floor((def.cost.wood ?? 0) * 0.5)
     s.resources.steel += Math.floor((def.cost.steel ?? 0) * 0.5)
@@ -316,6 +332,8 @@ export class Game {
       if (!b) return
       const def = BUILDINGS[b.type]
       if (!def.workerKind || !def.maxWorkers) return
+      // Scouts are out in the wastes: the squad can't be changed until they return
+      if (b.type === 'beacon' && s.expedition) return
       const free = def.workerKind === 'workers' ? s.stats.freeWorkers : s.stats.freeEngineers
       b.assigned = clamp(b.assigned + this.allowedDelta(delta, free), 0, def.maxWorkers)
     }
@@ -328,6 +346,12 @@ export class Game {
     if (!b) return
     b.enabled = !b.enabled
     this.recomputeHeat()
+  }
+
+  // ---------- Expeditions ----------
+  sendExpedition(siteId: string) {
+    if (startExpedition(this.state, siteId)) this.refreshStats()
+    this.emit(true)
   }
 
   // ---------- Generator ----------
