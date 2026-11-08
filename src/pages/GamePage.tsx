@@ -10,6 +10,7 @@ import { BottomHud } from './game/ui/BottomHud'
 import { LawsDialog, ResearchDialog } from './game/ui/Dialogs'
 import { MenuDialog } from './game/ui/MenuDialog'
 import { EndScreen, EventDialog, LeftColumn } from './game/ui/Overlays'
+import { HudScaler } from './game/ui/HudScaler'
 import { SelectionPanel } from './game/ui/SelectionPanel'
 import { TopBar } from './game/ui/TopBar'
 import { GameContext, useGame } from './game/ui/useGame'
@@ -50,6 +51,8 @@ function TitleScreen({ onStart, onContinue }: { onStart: () => void; onContinue:
           <li>• Следите за <b>вместимостью складов</b></li>
           <li>• Выполняйте <b>задания</b> на панели слева</li>
           <li>• Подписывайте <b>законы</b>, исследуйте <b>технологии</b></li>
+          <li>• Строят <b>свободные жители</b> — оставляйте людей без работы</li>
+          <li>• <b>Маяк</b> шлёт разведчиков, <b>школа</b> растит инженеров</li>
           <li>• Хороните погибших — тела злят людей</li>
           <li>• ЛКМ-перетаскивание: поворот · ПКМ / WASD: сдвиг · Колесо: масштаб</li>
         </ul>
@@ -88,10 +91,12 @@ function GameShell() {
       <WorldView key={game.generation} />
       {started ? (
         <>
-          <TopBar />
-          <LeftColumn />
-          <SelectionPanel />
-          <BottomHud />
+          <HudScaler>
+            <TopBar />
+            <LeftColumn />
+            <SelectionPanel />
+            <BottomHud />
+          </HudScaler>
           <LawsDialog />
           <ResearchDialog />
           <EventDialog />
