@@ -19,7 +19,7 @@ function wheel(radius: number, mat: THREE.Material, spokes: number, teeth = 0): 
 }
 
 /** Four-legged lattice tower: legs between base and top corners with rings and X braces. */
-function lattice(k: Kit, base: V3[], top: V3[], levels: number, t: number, mat: THREE.Material) {
+export function lattice(k: Kit, base: V3[], top: V3[], levels: number, t: number, mat: THREE.Material) {
   const lerp = (a: V3, b: V3, f: number): V3 => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]
   for (let i = 0; i < 4; i++) k.bar(base[i]!, top[i]!, t, mat)
   for (let l = 0; l <= levels; l++) {
