@@ -1,121 +1,80 @@
+import { STORM_START_DAY } from './data'
+import { RANDOM_EVENTS, type RandomEventDef } from './randomEvents'
 import { addLog, clamp, totalPop } from './simulation'
-import type { ActivePromise, GameState, PendingEvent } from './types'
-
-interface ScriptedEvent extends PendingEvent {
-  at: number
-}
+import type { ActivePromise, EventChoice, GameState } from './types'
 
 const at = (day: number, hour: number) => (day - 1) * 24 + hour
 
-const SCRIPTED: ScriptedEvent[] = [
-  {
-    id: 'shelter', at: at(1, 15), title: 'Крыша до темноты',
-    text: 'Выжившие жмутся друг к другу в снегу, а свет уже меркнет. Вперёд выходит плотник: «Дайте нам кров — и мы отдадим вам все силы».',
-    choices: [
-      { label: 'Обещаю: к утру у всех будет крыша', hint: 'Обещание: расселить всех до 08:00 2-го дня', action: 'promise_house' },
-      { label: 'Сейчас есть дела поважнее', hint: 'Недовольство +5', action: 'refuse_promise' },
-    ],
-  },
-  {
-    id: 'refugees1', at: at(4, 10), title: 'Чужаки на гребне',
-    text: 'По стене кратера спускается колонна оборванных путников: восемнадцать человек, среди них двое инженеров. Они умоляют пустить их к теплу.',
-    choices: [
-      { label: 'Открыть ворота', hint: '+12 рабочих, +2 инженера, +4 ребёнка, Надежда +5', action: 'accept_refugees1' },
-      { label: 'Нам не прокормить лишние рты', hint: 'Надежда −6', action: 'refuse_refugees' },
-    ],
-  },
-  {
-    id: 'warmHomes', at: at(6, 9), title: 'Иней на подушках',
-    text: 'Семьи просыпаются со льдом в волосах. Делегация просит, чтобы в каждом доме было хотя бы прохладно, а не морозно.',
-    choices: [
-      { label: 'В течение 36 часов во всех домах будет тепло', hint: 'Обещание: во всех домах «Прохладно» или теплее', action: 'promise_heat' },
-      { label: 'Холод — это часть жизни', hint: 'Недовольство +6', action: 'refuse_promise_heat' },
-    ],
-  },
-  {
-    id: 'refugees2', at: at(9, 11), title: 'Обмороженные',
-    text: 'С юга, хромая, приходит санная упряжка. Многие обморожены, некоторые — тяжело. Там, снаружи, они погибнут.',
-    choices: [
-      { label: 'Принять всех до единого', hint: '+15 рабочих, +5 детей (9 больных, 3 тяжелобольных), Надежда +6', action: 'accept_refugees2' },
-      { label: 'Развернуть сани', hint: 'Надежда −8', action: 'refuse_refugees2' },
-    ],
-  },
-  {
-    id: 'theft', at: at(11, 14), title: 'Вор на складе',
-    text: 'Отца семейства поймали на краже пайков для детей. Толпа ждёт вашего решения.',
-    choices: [
-      { label: 'Наказать его в назидание другим', hint: 'Недовольство −4, Надежда −4', action: 'punish' },
-      { label: 'Пусть оставит еду себе', hint: 'Пайки −25, Недовольство +4', action: 'forgive' },
-    ],
-  },
-  {
-    id: 'scouts', at: at(13, 8), title: 'Белая стена',
-    text: 'Дозорные на гребне видят, как чернеет северный горизонт. Примерно через пять дней на город обрушится великая буря. Запасайте уголь, утепляйте дома, готовьте генератор.',
-    choices: [{ label: 'Мы будем готовы', hint: 'Буря начнётся на 18-й день', action: 'none' }],
-  },
-  {
-    id: 'sickPromise', at: at(14, 10), title: 'Кашель в темноте',
-    text: 'Больные заполнили каждый угол. Люди требуют действовать, пока не пришла буря.',
-    choices: [
-      { label: 'Меньше 5 больных в течение 48 часов', hint: 'Обещание: больных и тяжелобольных < 5', action: 'promise_sick' },
-      { label: 'Сначала — здоровые', hint: 'Недовольство +5', action: 'refuse_promise_sick' },
-    ],
-  },
-  {
-    id: 'storm', at: at(18, 0), title: 'Буря',
-    text: 'Небо стало цвета железа. Температура падает ниже, чем город когда-либо знал. Не дайте огню погаснуть. Продержитесь до 21-го дня.',
-    choices: [{ label: 'Огонь не погаснет', hint: 'Продержитесь 3 дня', action: 'none' }],
-  },
-]
+/** Minimum quiet hours between two random events */
+const MIN_GAP = 10
 
-export function checkEvents(s: GameState) {
-  if (s.pendingEvent) return
-  for (const e of SCRIPTED) {
-    if (s.time >= e.at && !s.firedEvents.includes(e.id)) {
-      s.firedEvents.push(e.id)
-      if (e.id === 'refugees2' && totalPop(s) <= 0) continue
-      s.pendingEvent = { id: e.id, title: e.title, text: e.text, choices: e.choices }
-      return
-    }
-  }
+/**
+ * Story milestones tied to the storm. Only these two are fixed; the warning itself
+ * comes at a random moment within a window, not at a set hour.
+ */
+const STORM_WARNING = { from: at(STORM_START_DAY - 6, 8), until: at(STORM_START_DAY - 4, 18) }
+
+function fire(s: GameState, id: string, title: string, text: string, choices: EventChoice[], data?: Record<string, number>) {
+  s.pendingEvent = data ? { id, title, text, choices, data } : { id, title, text, choices }
 }
 
-function makePromise(s: GameState, kind: ActivePromise['kind'], text: string, hours: number) {
-  s.promise = { id: `${kind}-${s.time}`, kind, text, deadline: s.time + hours }
-  s.hope = clamp(s.hope + 3, 0, 100)
-  addLog(s, `Дано обещание: ${text}`, 'info')
+function milestones(s: GameState): boolean {
+  if (!s.firedEvents.includes('scouts') && s.time >= STORM_WARNING.from) {
+    if (s.time >= STORM_WARNING.until || Math.random() < 0.08) {
+      s.firedEvents.push('scouts')
+      const days = Math.max(1, Math.round((at(STORM_START_DAY, 0) - s.time) / 24))
+      fire(s, 'scouts', 'Белая стена',
+        `Дозорные на гребне видят, как чернеет северный горизонт. Примерно через ${days} дн. на город обрушится великая буря. Запасайте уголь, утепляйте дома, готовьте генератор.`,
+        [{ label: 'Мы будем готовы', hint: `Буря начнётся на ${STORM_START_DAY}-й день`, action: 'none' }])
+      return true
+    }
+  }
+  if (!s.firedEvents.includes('storm') && s.time >= at(STORM_START_DAY, 0)) {
+    s.firedEvents.push('storm')
+    fire(s, 'storm', 'Буря',
+      'Небо стало цвета железа. Температура падает ниже, чем город когда-либо знал. Не дайте огню погаснуть. Продержитесь до 21-го дня.',
+      [{ label: 'Огонь не погаснет', hint: 'Продержитесь 3 дня', action: 'none' }])
+    return true
+  }
+  return false
+}
+
+function eligible(s: GameState, e: RandomEventDef): boolean {
+  const day = Math.floor(s.time / 24) + 1
+  if (e.minDay && day < e.minDay) return false
+  if (e.maxDay && day > e.maxDay) return false
+  const last = s.eventLog[e.id]
+  if (last !== undefined && (e.cooldown === Infinity || s.time - last < e.cooldown)) return false
+  return e.when ? e.when(s) : true
+}
+
+/** Called every hour: maybe trigger a random event (more likely the longer it has been quiet). */
+export function checkEvents(s: GameState) {
+  if (s.pendingEvent || s.status !== 'playing' || totalPop(s) <= 0) return
+  if (milestones(s)) return
+  const hour = Math.round(s.time) % 24
+  if (hour < 7 || hour > 21) return
+  const quiet = s.time - s.lastEventAt
+  if (quiet < MIN_GAP) return
+  const chance = Math.min(0.4, 0.05 + (quiet - MIN_GAP) * 0.012)
+  if (Math.random() > chance) return
+  const pool = RANDOM_EVENTS.filter((e) => eligible(s, e))
+  const total = pool.reduce((sum, e) => sum + e.weight, 0)
+  if (total <= 0) return
+  let r = Math.random() * total
+  const chosen = pool.find((e) => (r -= e.weight) <= 0) ?? pool[pool.length - 1]
+  if (!chosen) return
+  const draft = chosen.make(s)
+  s.eventLog[chosen.id] = s.time
+  s.lastEventAt = s.time
+  fire(s, chosen.id, draft.title, draft.text, draft.choices, draft.data)
 }
 
 export function resolveEvent(s: GameState, action: string) {
-  switch (action) {
-    case 'promise_house': makePromise(s, 'house_all', 'Расселить всех жителей', Math.max(4, at(2, 8) - s.time)); break
-    case 'promise_heat': makePromise(s, 'heat_homes', 'Во всех домах «Прохладно» или теплее', 36); break
-    case 'promise_sick': makePromise(s, 'no_sick', 'Меньше 5 больных', 48); break
-    case 'refuse_promise': s.discontent = clamp(s.discontent + 5, 0, 100); break
-    case 'refuse_promise_heat': s.discontent = clamp(s.discontent + 6, 0, 100); break
-    case 'refuse_promise_sick': s.discontent = clamp(s.discontent + 5, 0, 100); break
-    case 'accept_refugees1':
-      s.pop.workers += 12; s.pop.engineers += 2; s.pop.children += 4
-      s.hope = clamp(s.hope + 5, 0, 100)
-      addLog(s, 'К городу присоединились 18 новых жителей.', 'good')
-      break
-    case 'refuse_refugees': s.hope = clamp(s.hope - 6, 0, 100); break
-    case 'accept_refugees2':
-      s.pop.workers += 15; s.pop.children += 5
-      s.sick += 9; s.gravelyIll += 3
-      s.hope = clamp(s.hope + 6, 0, 100)
-      addLog(s, 'К городу присоединились 20 обмороженных выживших.', 'good')
-      break
-    case 'refuse_refugees2': s.hope = clamp(s.hope - 8, 0, 100); break
-    case 'punish':
-      s.discontent = clamp(s.discontent - 4, 0, 100); s.hope = clamp(s.hope - 4, 0, 100)
-      break
-    case 'forgive':
-      s.resources.rations = Math.max(0, s.resources.rations - 25)
-      s.discontent = clamp(s.discontent + 4, 0, 100)
-      break
-    default: break
-  }
+  const ev = s.pendingEvent
+  const def = ev ? RANDOM_EVENTS.find((e) => e.id === ev.id) : undefined
+  const effect = def?.effects[action]
+  if (ev && effect) effect(s, ev.data ?? {})
   s.pendingEvent = null
 }
 
